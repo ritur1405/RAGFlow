@@ -46,7 +46,7 @@ Both members work across ML/RAG and development. Each week has a lead owner, but
 **Cross-training:** ~30% development contribution  
 **Cross-training:** ~30% ML/RAG contribution
 
-## 5. Target Architecture
+## 4. Target Architecture
 
 React → FastAPI → PostgreSQL + pgvector  
 Ingestion: PDF → extraction → cleaning → chunking → embeddings  
