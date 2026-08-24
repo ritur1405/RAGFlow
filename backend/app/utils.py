@@ -8,6 +8,13 @@ def chunk_text(
     text: str, chunk_size: int = 500, chunk_overlap: int = 50
 ) -> list[str]:
     """Splits a string into overlapping chunks."""
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than 0.")
+    if chunk_overlap < 0:
+        raise ValueError("chunk_overlap must be greater than or equal to 0.")
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be less than chunk_size.")
+
     if not text:
         return []
 
@@ -66,7 +73,7 @@ def extract_text_from_pdf(file_bytes: bytes) -> list[dict]:
     return pages
 
 
-def clean_text(text: str) -> str:
+def clean_text(text: str | None) -> str:
     """Cleans raw PDF-extracted text.
 
     Applies the following transformations in order:

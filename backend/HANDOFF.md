@@ -83,5 +83,5 @@ All errors are `ValueError` — Member B can catch this single type in the uploa
 Tests require no external services. The `conftest.py` sets dummy `DATABASE_URL` and `GEMINI_API_KEY` automatically. Run:
 
 ```bash
-.venv/Scripts/python -m pytest backend/tests/ -v
+python -m pytest backend/tests/ -v
 ```

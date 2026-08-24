@@ -4,14 +4,14 @@ Covers:
   - extract_text_from_pdf  (mocked PdfReader + corrupt-PDF guard)
   - clean_text             (direct string input)
   - chunk_pages            (direct dict input)
-  - Real-PDF integration   (end-to-end with pypdf.PdfWriter)
+  - Real-PDF integration   (end-to-end PDF generated with reportlab)
 """
 
 import io
 
 import pytest
 from unittest.mock import MagicMock, patch
-from pypdf import PdfWriter
+# from pypdf import PdfWriter
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
 
