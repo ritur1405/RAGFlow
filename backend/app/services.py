@@ -69,3 +69,36 @@ Answer:"""
         contents=prompt,
     )
     return response.text
+
+
+def generate_embeddings_batch(
+    texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", batch_size: int = 100
+) -> list[list[float]]:
+    """Generates 768-dimensional vector embeddings for a list of strings in batches.
+
+    Splits the texts into safe chunk batches to avoid request size/limit errors.
+    """
+    if not texts:
+        return []
+
+    embeddings = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        response = client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=batch,
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=EMBEDDING_DIM,
+            ),
+        )
+        if not response.embeddings or len(response.embeddings) != len(batch):
+            raise ValueError(
+                f"Failed to generate embeddings for batch. Expected {len(batch)}, "
+                f"got {len(response.embeddings) if response.embeddings else 0}."
+            )
+
+        for emb in response.embeddings:
+            embeddings.append(emb.values)
+
+    return embeddings
