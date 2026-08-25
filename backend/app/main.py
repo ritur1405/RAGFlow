@@ -1,13 +1,19 @@
-from fastapi import Depends, FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
 from app.models import Document
-from app.services import generate_answer, generate_embedding, search_documents
+from app.services import generate_answer, generate_embedding, search_documents, process_pdf
 from app.utils import chunk_text
+from app.schemas import (
+    DocumentCreate,
+    DocumentChunkOut,
+    IngestionResponse,
+    QueryRequest,
+    QueryResponse,
+)
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
@@ -37,33 +43,6 @@ async def global_exception_handler(request: Request, exc: Exception):
     )
 
 
-# Request & Response Schemas
-class DocumentCreate(BaseModel):
-    title: str
-    content: str
-
-
-class DocumentChunkOut(BaseModel):
-    id: int
-    title: str
-    content: str
-
-
-class IngestionResponse(BaseModel):
-    message: str
-    chunks: list[DocumentChunkOut]
-
-
-class QueryRequest(BaseModel):
-    question: str
-
-
-class QueryResponse(BaseModel):
-    question: str
-    answer: str
-    sources: list[DocumentChunkOut]
-
-
 @app.get("/")
 def read_root():
     return {"message": "RAGFlow Backend API is running!"}
@@ -71,11 +50,10 @@ def read_root():
 
 @app.post("/documents/", response_model=IngestionResponse)
 def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
-    """Ingests a long document, breaks it into overlapping chunks, generates embeddings, and saves them."""
+    """Ingests raw text, breaks it into overlapping chunks, generates embeddings, and saves them."""
     if not doc.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty.")
 
-    # Break long content into smaller overlapping chunks
     chunks = chunk_text(doc.content, chunk_size=500, chunk_overlap=50)
     created_docs = []
 
@@ -85,20 +63,79 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
             title=f"{doc.title} (Chunk {i+1})",
             content=chunk,
             embedding=embedding,
+            chunk_index=i,
         )
         db.add(db_doc)
         created_docs.append(db_doc)
 
     db.commit()
 
-    # Refresh instances to capture generated database IDs
     for d in created_docs:
         db.refresh(d)
 
     return IngestionResponse(
         message=f"Successfully created and stored {len(created_docs)} chunk(s).",
         chunks=[
-            DocumentChunkOut(id=d.id, title=d.title, content=d.content)
+            DocumentChunkOut(
+                id=d.id,
+                title=d.title,
+                content=d.content,
+                chunk_index=d.chunk_index,
+                page_number=getattr(d, "page_number", None),
+            )
+            for d in created_docs
+        ],
+    )
+
+
+@app.post("/documents/upload/", response_model=IngestionResponse)
+async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
+    """Receives a PDF file, parses chunks using the processor, and saves vectors to PostgreSQL."""
+    if not file.filename.lower().endswith(".pdf"):
+        raise HTTPException(status_code=400, detail="Only PDF files are supported.")
+
+    # 1. Read binary bytes from upload
+    contents = await file.read()
+
+    # 2. Pass bytes to your teammate's processor function
+    try:
+        parsed_chunks = process_pdf(contents)
+    except Exception as e:
+        raise HTTPException(status_code=422, detail=f"Error processing PDF: {str(e)}")
+
+    if not parsed_chunks:
+        raise HTTPException(status_code=400, detail="No readable text could be extracted from the PDF.")
+
+    created_docs = []
+
+    # 3. Store extracted chunks and embeddings in PostgreSQL (pgvector)
+    for item in parsed_chunks:
+        db_doc = Document(
+            file_name=file.filename,
+            title=f"{file.filename} (Page {item.get('page_number', 1)}, Chunk {item.get('chunk_index', 0)})",
+            content=item.get("text", ""),
+            page_number=item.get("page_number"),
+            chunk_index=item.get("chunk_index"),
+            embedding=item.get("embedding"),
+        )
+        db.add(db_doc)
+        created_docs.append(db_doc)
+
+    db.commit()
+
+    for d in created_docs:
+        db.refresh(d)
+
+    return IngestionResponse(
+        message=f"Successfully processed '{file.filename}' and stored {len(created_docs)} chunk(s).",
+        chunks=[
+            DocumentChunkOut(
+                id=d.id,
+                title=d.title,
+                content=d.content,
+                chunk_index=d.chunk_index,
+                page_number=d.page_number,
+            )
             for d in created_docs
         ],
     )
@@ -109,7 +146,13 @@ def list_documents(db: Session = Depends(get_db)):
     """Retrieves all stored document chunks from the database."""
     docs = db.query(Document).all()
     return [
-        DocumentChunkOut(id=d.id, title=d.title, content=d.content)
+        DocumentChunkOut(
+            id=d.id,
+            title=d.title,
+            content=d.content,
+            chunk_index=getattr(d, "chunk_index", None),
+            page_number=getattr(d, "page_number", None),
+        )
         for d in docs
     ]
 
@@ -130,14 +173,9 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
 def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
     """Performs vector similarity search over chunks and uses Gemini to answer using context."""
     if not request.question.strip():
-        raise HTTPException(
-            status_code=400, detail="Question cannot be empty."
-        )
+        raise HTTPException(status_code=400, detail="Question cannot be empty.")
 
-    # 1. Generate embedding for query
     query_vector = generate_embedding(request.question, task_type="RETRIEVAL_QUERY")
-
-    # 2. Search vector database for top matching chunks
     relevant_docs = search_documents(db, query_vector, top_k=3)
 
     if not relevant_docs:
@@ -147,17 +185,20 @@ def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
             sources=[],
         )
 
-    # 3. Extract relevant content
     context_list = [doc.content for doc in relevant_docs]
-
-    # 4. Generate answer with Gemini
     answer = generate_answer(request.question, context_list)
 
     return QueryResponse(
         question=request.question,
         answer=answer,
         sources=[
-            DocumentChunkOut(id=doc.id, title=doc.title, content=doc.content)
+            DocumentChunkOut(
+                id=doc.id,
+                title=doc.title,
+                content=doc.content,
+                chunk_index=getattr(doc, "chunk_index", None),
+                page_number=getattr(doc, "page_number", None),
+            )
             for doc in relevant_docs
-        ],
+        ]
     )
