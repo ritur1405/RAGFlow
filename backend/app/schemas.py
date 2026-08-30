@@ -1,23 +1,56 @@
-from pydantic import BaseModel
+import re
 from typing import Optional
-from datetime import datetime
+from pydantic import BaseModel, Field, field_validator
 
-# Request model when uploading/adding a document
+
+# ---- Ingestion schemas ----
+
 class DocumentCreate(BaseModel):
-    title: str
-    content: str
+    title: str = Field(..., min_length=1, max_length=300)
+    content: str = Field(..., min_length=1, max_length=200_000)
 
-# Response model when returning a document from the database
-class DocumentResponse(BaseModel):
+
+class DocumentChunkOut(BaseModel):
     id: int
     title: str
     content: str
-    created_at: datetime
+    chunk_index: Optional[int] = None
+    page_number: Optional[int] = None
 
-    class Config:
-        from_attributes = True
 
-# Request model for vector search / querying
+class IngestionResponse(BaseModel):
+    message: str
+    chunks: list[DocumentChunkOut]
+
+
+# ---- Query schemas ----
+
+# Strips characters with no legitimate place in a natural-language question:
+# control chars, null bytes, and common prompt-injection delimiter patterns.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
+
+
 class QueryRequest(BaseModel):
-    query: str
-    top_k: Optional[int] = 3
+    question: str = Field(
+        ...,
+        min_length=3,
+        max_length=1000,
+        description="The user's natural-language question about ingested documents.",
+    )
+
+    @field_validator("question")
+    @classmethod
+    def sanitize_question(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Question cannot be empty or whitespace only.")
+        v = _CONTROL_CHAR_RE.sub("", v)
+        # Collapse excessive internal whitespace (e.g. pasted PDFs, spam padding)
+        v = re.sub(r"\s+", " ", v)
+        return v
+
+
+class QueryResponse(BaseModel):
+    question: str
+    answer: str
+    sources: list[DocumentChunkOut]
