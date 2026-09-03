@@ -1,6 +1,8 @@
+import json
+
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
@@ -12,6 +14,7 @@ from app.services import (
     process_pdf,
     is_meta_question,
     generate_summary_answer,
+    stream_generate_answer,
     MAX_RELEVANT_DISTANCE,
     NO_ANSWER_MESSAGE,
 )
@@ -24,26 +27,22 @@ from app.schemas import (
     QueryResponse,
 )
 
-# Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="RAGFlow Backend")
 
-# Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production (e.g. ["http://localhost:3000"])
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Constants for File Validation
 MAX_FILE_SIZE_MB = 10
 ALLOWED_MIME_TYPES = ["application/pdf"]
 
 
-# Global Exception Handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
@@ -63,7 +62,6 @@ def read_root():
 
 @app.post("/documents/", response_model=IngestionResponse)
 def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
-    """Ingests raw text, breaks it into overlapping chunks, generates embeddings, and saves them."""
     if not doc.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty.")
 
@@ -93,6 +91,7 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
                 id=d.id,
                 title=d.title,
                 content=d.content,
+                file_name=getattr(d, "file_name", None),
                 chunk_index=d.chunk_index,
                 page_number=getattr(d, "page_number", None),
             )
@@ -103,19 +102,14 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
 
 @app.post("/documents/upload/", response_model=IngestionResponse)
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Receives a PDF file, validates format and size, extracts chunks, and saves vectors to PostgreSQL."""
-
-    # 1. Validate File Extension and MIME Type
     if not file.filename.lower().endswith(".pdf") or file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=400,
             detail="Invalid file format. Only PDF files (.pdf) are supported."
         )
 
-    # 2. Read Binary Content
     contents = await file.read()
 
-    # 3. Validate File Size (Max 10MB)
     file_size_mb = len(contents) / (1024 * 1024)
     if file_size_mb > MAX_FILE_SIZE_MB:
         raise HTTPException(
@@ -123,7 +117,6 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
             detail=f"File size exceeds maximum limit of {MAX_FILE_SIZE_MB}MB."
         )
 
-    # 4. Extract Chunks via PDF Processor
     try:
         parsed_chunks = process_pdf(contents)
     except Exception as e:
@@ -132,7 +125,6 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
             detail=f"Unable to process PDF. File may be corrupted or unreadable. Error: {str(e)}"
         )
 
-    # 5. Handle Scanned / Textless PDFs
     if not parsed_chunks:
         raise HTTPException(
             status_code=400,
@@ -141,7 +133,6 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
 
     created_docs = []
 
-    # 6. Save Chunks, Vector Embeddings, and Metadata in PostgreSQL
     for item in parsed_chunks:
         db_doc = Document(
             file_name=file.filename,
@@ -166,6 +157,7 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
                 id=d.id,
                 title=d.title,
                 content=d.content,
+                file_name=d.file_name,
                 chunk_index=d.chunk_index,
                 page_number=d.page_number,
             )
@@ -176,13 +168,13 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
 
 @app.get("/documents/", response_model=list[DocumentChunkOut])
 def list_documents(db: Session = Depends(get_db)):
-    """Retrieves all stored document chunks from the database."""
     docs = db.query(Document).all()
     return [
         DocumentChunkOut(
             id=d.id,
             title=d.title,
             content=d.content,
+            file_name=getattr(d, "file_name", None),
             chunk_index=getattr(d, "chunk_index", None),
             page_number=getattr(d, "page_number", None),
         )
@@ -192,7 +184,6 @@ def list_documents(db: Session = Depends(get_db)):
 
 @app.delete("/documents/{doc_id}")
 def delete_document(doc_id: int, db: Session = Depends(get_db)):
-    """Deletes a specific document chunk by ID."""
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document chunk not found.")
@@ -202,60 +193,69 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
     return {"message": f"Document ID {doc_id} successfully deleted."}
 
 
-@app.post("/query/", response_model=QueryResponse)
-def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
-    """Performs vector similarity search over chunks and uses Gemini to answer using context.
-
-    - Broad/summary-style questions bypass vector search and use the whole document.
-    - Specific questions use top-k pgvector search, but fall back to a fixed
-      "cannot find" message if nothing beats MAX_RELEVANT_DISTANCE, rather than
-      forcing Gemini to answer from irrelevant chunks.
-    - request.question is already validated/sanitized by QueryRequest (schemas.py):
-      length-bounded and stripped of control characters.
-    """
+def _resolve_context(request: QueryRequest, db: Session):
     if is_meta_question(request.question):
         answer, relevant_docs = generate_summary_answer(db, request.question)
-        return QueryResponse(
-            question=request.question,
-            answer=answer,
-            sources=[
-                DocumentChunkOut(
-                    id=doc.id,
-                    title=doc.title,
-                    content=doc.content,
-                    chunk_index=getattr(doc, "chunk_index", None),
-                    page_number=getattr(doc, "page_number", None),
-                )
-                for doc in relevant_docs
-            ],
-        )
+        return relevant_docs, answer
 
     query_vector = generate_embedding(request.question, task_type="RETRIEVAL_QUERY")
     scored_docs = search_documents(db, query_vector, top_k=3)
 
-    # Fallback: no chunks at all, or nothing close enough to be trustworthy.
     if not scored_docs or scored_docs[0][1] > MAX_RELEVANT_DISTANCE:
-        return QueryResponse(
-            question=request.question,
-            answer=NO_ANSWER_MESSAGE,
-            sources=[],
-        )
+        return [], NO_ANSWER_MESSAGE
 
     relevant_docs = [doc for doc, distance in scored_docs]
-    context_list = [doc.content for doc in relevant_docs]
-    answer = generate_answer(request.question, context_list)
+    return relevant_docs, None
+
+
+def _to_chunk_out(doc: Document) -> DocumentChunkOut:
+    return DocumentChunkOut(
+        id=doc.id,
+        title=doc.title,
+        content=doc.content,
+        file_name=getattr(doc, "file_name", None),
+        chunk_index=getattr(doc, "chunk_index", None),
+        page_number=getattr(doc, "page_number", None),
+    )
+
+
+@app.post("/query/", response_model=QueryResponse)
+def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
+    relevant_docs, fallback_answer = _resolve_context(request, db)
+
+    if fallback_answer is not None:
+        return QueryResponse(
+            question=request.question,
+            answer=fallback_answer,
+            sources=[_to_chunk_out(doc) for doc in relevant_docs],
+        )
+
+    answer = generate_answer(request.question, relevant_docs)
 
     return QueryResponse(
         question=request.question,
         answer=answer,
-        sources=[
-            DocumentChunkOut(
-                id=doc.id,
-                title=doc.title,
-                content=doc.content,
-                chunk_index=getattr(doc, "chunk_index", None),
-                page_number=getattr(doc, "page_number", None),
-            )
-            for doc in relevant_docs
-        ],
+        sources=[_to_chunk_out(doc) for doc in relevant_docs],
     )
+
+
+@app.post("/query/stream/")
+def query_rag_stream(request: QueryRequest, db: Session = Depends(get_db)):
+    relevant_docs, fallback_answer = _resolve_context(request, db)
+
+    def event_stream():
+        if fallback_answer is not None:
+            safe_text = fallback_answer.replace("\n", "\ndata: ")
+            yield f"data: {safe_text}\n\n"
+        else:
+            for token in stream_generate_answer(request.question, relevant_docs):
+                safe_token = token.replace("\n", "\ndata: ")
+                yield f"data: {safe_token}\n\n"
+
+        sources_payload = json.dumps([
+            _to_chunk_out(doc).model_dump() for doc in relevant_docs
+        ])
+        yield f"event: sources\ndata: {sources_payload}\n\n"
+        yield "event: done\ndata: [DONE]\n\n"
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream")
