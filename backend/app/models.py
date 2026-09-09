@@ -7,6 +7,9 @@ class Document(Base):
     __tablename__ = "documents"
 
     id = Column(Integer, primary_key=True, index=True)
+    file_name = Column(String, nullable=True)     # Stores original filename (e.g. sample.pdf)
     title = Column(String, nullable=False)
     content = Column(Text, nullable=False)
-    embedding = Column(Vector(768))  # Gemini text-embedding-004 produces 768-dimensional vectors
+    page_number = Column(Integer, nullable=True)  # Page from PDF
+    chunk_index = Column(Integer, nullable=True)  # Position index of chunk
+    embedding = Column(Vector(768))                # pgvector embedding
