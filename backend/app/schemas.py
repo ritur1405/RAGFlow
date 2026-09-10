@@ -14,7 +14,10 @@ class DocumentChunkOut(BaseModel):
     id: int
     title: str
     content: str
+week-3
     file_name: Optional[str] = None
+
+main
     chunk_index: Optional[int] = None
     page_number: Optional[int] = None
 

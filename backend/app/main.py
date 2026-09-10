@@ -1,8 +1,14 @@
+week-3
 import json
 
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+main
 from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
@@ -14,7 +20,10 @@ from app.services import (
     process_pdf,
     is_meta_question,
     generate_summary_answer,
+week-3
     stream_generate_answer,
+
+main
     MAX_RELEVANT_DISTANCE,
     NO_ANSWER_MESSAGE,
 )
@@ -39,6 +48,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+week-3
+# Constants for File Validation
+ main
 MAX_FILE_SIZE_MB = 10
 ALLOWED_MIME_TYPES = ["application/pdf"]
 
@@ -62,6 +74,10 @@ def read_root():
 
 @app.post("/documents/", response_model=IngestionResponse)
 def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
+week-3
+
+    """Ingests raw text, breaks it into overlapping chunks, generates embeddings, and saves them."""
+ main
     if not doc.content.strip():
         raise HTTPException(status_code=400, detail="Content cannot be empty.")
 
@@ -91,7 +107,10 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
                 id=d.id,
                 title=d.title,
                 content=d.content,
+week-3
                 file_name=getattr(d, "file_name", None),
+
+ main
                 chunk_index=d.chunk_index,
                 page_number=getattr(d, "page_number", None),
             )
@@ -102,14 +121,27 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
 
 @app.post("/documents/upload/", response_model=IngestionResponse)
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
+week-3
+
+    """Receives a PDF file, validates format and size, extracts chunks, and saves vectors to PostgreSQL."""
+
+    # 1. Validate File Extension and MIME Type
+main
     if not file.filename.lower().endswith(".pdf") or file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=400,
             detail="Invalid file format. Only PDF files (.pdf) are supported."
         )
 
+ week-3
     contents = await file.read()
 
+
+    # 2. Read Binary Content
+    contents = await file.read()
+
+    # 3. Validate File Size (Max 10MB)
+ main
     file_size_mb = len(contents) / (1024 * 1024)
     if file_size_mb > MAX_FILE_SIZE_MB:
         raise HTTPException(
@@ -117,6 +149,9 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
             detail=f"File size exceeds maximum limit of {MAX_FILE_SIZE_MB}MB."
         )
 
+week-3
+    # 4. Extract Chunks via PDF Processor
+ main
     try:
         parsed_chunks = process_pdf(contents)
     except Exception as e:
@@ -125,6 +160,10 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
             detail=f"Unable to process PDF. File may be corrupted or unreadable. Error: {str(e)}"
         )
 
+week-3
+
+    # 5. Handle Scanned / Textless PDFs
+main
     if not parsed_chunks:
         raise HTTPException(
             status_code=400,
@@ -133,6 +172,10 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
 
     created_docs = []
 
+ week-3
+
+    # 6. Save Chunks, Vector Embeddings, and Metadata in PostgreSQL
+ main
     for item in parsed_chunks:
         db_doc = Document(
             file_name=file.filename,
@@ -157,7 +200,10 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
                 id=d.id,
                 title=d.title,
                 content=d.content,
+ week-3
                 file_name=d.file_name,
+
+ main
                 chunk_index=d.chunk_index,
                 page_number=d.page_number,
             )
@@ -174,7 +220,10 @@ def list_documents(db: Session = Depends(get_db)):
             id=d.id,
             title=d.title,
             content=d.content,
+ week-3
             file_name=getattr(d, "file_name", None),
+
+ main
             chunk_index=getattr(d, "chunk_index", None),
             page_number=getattr(d, "page_number", None),
         )
@@ -193,14 +242,45 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
     return {"message": f"Document ID {doc_id} successfully deleted."}
 
 
+ week-3
 def _resolve_context(request: QueryRequest, db: Session):
     if is_meta_question(request.question):
         answer, relevant_docs = generate_summary_answer(db, request.question)
         return relevant_docs, answer
 
+@app.post("/query/", response_model=QueryResponse)
+def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
+    """Performs vector similarity search over chunks and uses Gemini to answer using context.
+
+    - Broad/summary-style questions bypass vector search and use the whole document.
+    - Specific questions use top-k pgvector search, but fall back to a fixed
+      "cannot find" message if nothing beats MAX_RELEVANT_DISTANCE, rather than
+      forcing Gemini to answer from irrelevant chunks.
+    - request.question is already validated/sanitized by QueryRequest (schemas.py):
+      length-bounded and stripped of control characters.
+    """
+    if is_meta_question(request.question):
+        answer, relevant_docs = generate_summary_answer(db, request.question)
+        return QueryResponse(
+            question=request.question,
+            answer=answer,
+            sources=[
+                DocumentChunkOut(
+                    id=doc.id,
+                    title=doc.title,
+                    content=doc.content,
+                    chunk_index=getattr(doc, "chunk_index", None),
+                    page_number=getattr(doc, "page_number", None),
+                )
+                for doc in relevant_docs
+            ],
+        )
+ main
+
     query_vector = generate_embedding(request.question, task_type="RETRIEVAL_QUERY")
     scored_docs = search_documents(db, query_vector, top_k=3)
 
+ week-3
     if not scored_docs or scored_docs[0][1] > MAX_RELEVANT_DISTANCE:
         return [], NO_ANSWER_MESSAGE
 
@@ -232,9 +312,23 @@ def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
 
     answer = generate_answer(request.question, relevant_docs)
 
+    # Fallback: no chunks at all, or nothing close enough to be trustworthy.
+    if not scored_docs or scored_docs[0][1] > MAX_RELEVANT_DISTANCE:
+        return QueryResponse(
+            question=request.question,
+            answer=NO_ANSWER_MESSAGE,
+            sources=[],
+        )
+
+    relevant_docs = [doc for doc, distance in scored_docs]
+    context_list = [doc.content for doc in relevant_docs]
+    answer = generate_answer(request.question, context_list)
+ main
+
     return QueryResponse(
         question=request.question,
         answer=answer,
+ week-3
         sources=[_to_chunk_out(doc) for doc in relevant_docs],
     )
 
@@ -259,3 +353,16 @@ def query_rag_stream(request: QueryRequest, db: Session = Depends(get_db)):
         yield "event: done\ndata: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+        sources=[
+            DocumentChunkOut(
+                id=doc.id,
+                title=doc.title,
+                content=doc.content,
+                chunk_index=getattr(doc, "chunk_index", None),
+                page_number=getattr(doc, "page_number", None),
+            )
+            for doc in relevant_docs
+        ],
+    )
+ main
