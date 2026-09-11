@@ -24,15 +24,13 @@ from app.schemas import (
     QueryResponse,
 )
 
-# Create database tables
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="RAGFlow Backend")
 
-# Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production (e.g. ["http://localhost:3000"])
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -43,7 +41,6 @@ MAX_FILE_SIZE_MB = 10
 ALLOWED_MIME_TYPES = ["application/pdf"]
 
 
-# Global Exception Handler
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(
@@ -103,13 +100,13 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
 
 @app.post("/documents/upload/", response_model=IngestionResponse)
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
+
+
     """Receives a PDF file, validates format and size, extracts chunks, and saves vectors to PostgreSQL."""
 
-    # 1. Validate File Extension and MIME Type
     if not file.filename.lower().endswith(".pdf") or file.content_type not in ALLOWED_MIME_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="Invalid file format. Only PDF files (.pdf) are supported."
         )
 
     # 2. Read Binary Content
@@ -176,7 +173,6 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
 
 @app.get("/documents/", response_model=list[DocumentChunkOut])
 def list_documents(db: Session = Depends(get_db)):
-    """Retrieves all stored document chunks from the database."""
     docs = db.query(Document).all()
     return [
         DocumentChunkOut(
@@ -192,7 +188,6 @@ def list_documents(db: Session = Depends(get_db)):
 
 @app.delete("/documents/{doc_id}")
 def delete_document(doc_id: int, db: Session = Depends(get_db)):
-    """Deletes a specific document chunk by ID."""
     doc = db.query(Document).filter(Document.id == doc_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document chunk not found.")
@@ -200,6 +195,32 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
     db.delete(doc)
     db.commit()
     return {"message": f"Document ID {doc_id} successfully deleted."}
+
+
+def _resolve_context(request: QueryRequest, db: Session):
+    if is_meta_question(request.question):
+        answer, relevant_docs = generate_summary_answer(db, request.question)
+        return relevant_docs, answer
+
+    query_vector = generate_embedding(request.question, task_type="RETRIEVAL_QUERY")
+    scored_docs = search_documents(db, query_vector, top_k=3)
+
+    if not scored_docs or scored_docs[0][1] > MAX_RELEVANT_DISTANCE:
+        return [], NO_ANSWER_MESSAGE
+
+    relevant_docs = [doc for doc, distance in scored_docs]
+    return relevant_docs, None
+
+
+def _to_chunk_out(doc: Document) -> DocumentChunkOut:
+    return DocumentChunkOut(
+        id=doc.id,
+        title=doc.title,
+        content=doc.content,
+        file_name=getattr(doc, "file_name", None),
+        chunk_index=getattr(doc, "chunk_index", None),
+        page_number=getattr(doc, "page_number", None),
+    )
 
 
 @app.post("/query/", response_model=QueryResponse)

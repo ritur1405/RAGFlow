@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, Text
+from datetime import datetime
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, JSON
 from pgvector.sqlalchemy import Vector
 from app.database import Base
 
