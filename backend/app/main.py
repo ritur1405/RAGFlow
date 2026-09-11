@@ -6,7 +6,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
-from app.models import Document
+from app.models import Document, ExperimentConfig
 from app.services import (
     generate_answer,
     generate_embedding,
@@ -15,6 +15,7 @@ from app.services import (
     is_meta_question,
     generate_summary_answer,
     stream_generate_answer,
+    run_experiment_comparison,
     MAX_RELEVANT_DISTANCE,
     NO_ANSWER_MESSAGE,
 )
@@ -25,6 +26,10 @@ from app.schemas import (
     IngestionResponse,
     QueryRequest,
     QueryResponse,
+    ExperimentConfigCreate,
+    ExperimentConfigResponse,
+    RetrievalCompareRequest,
+    CompareResponse,
 )
 
 Base.metadata.create_all(bind=engine)
@@ -259,3 +264,30 @@ def query_rag_stream(request: QueryRequest, db: Session = Depends(get_db)):
         yield "event: done\ndata: [DONE]\n\n"
 
     return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+
+# ---- Week 4: Experimentation Endpoints ----
+
+@app.post("/experiments/config", response_model=ExperimentConfigResponse)
+def create_experiment_config(config: ExperimentConfigCreate, db: Session = Depends(get_db)):
+    db_config = ExperimentConfig(**config.model_dump())
+    db.add(db_config)
+    db.commit()
+    db.refresh(db_config)
+    return db_config
+
+
+@app.get("/experiments/config", response_model=list[ExperimentConfigResponse])
+def list_experiment_configs(db: Session = Depends(get_db)):
+    return db.query(ExperimentConfig).all()
+
+
+@app.post("/experiments/compare", response_model=CompareResponse)
+def compare_retrieval_modes(payload: RetrievalCompareRequest, db: Session = Depends(get_db)):
+    results = run_experiment_comparison(
+        db=db,
+        query=payload.query,
+        top_k=payload.top_k or 5,
+        alpha=payload.alpha or 0.5,
+    )
+    return CompareResponse(query=payload.query, comparisons=results)

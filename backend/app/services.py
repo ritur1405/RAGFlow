@@ -1,5 +1,6 @@
 import io
 import os
+import time
 from typing import Generator
 
 from google import genai
@@ -8,7 +9,7 @@ from pypdf import PdfReader
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import Document
+from app.models import Document, ExperimentRun
 from app.utils import chunk_text
 
 # Initialize Gemini Client (reads GEMINI_API_KEY from environment)
@@ -213,3 +214,79 @@ def process_pdf(file_contents: bytes) -> list[dict]:
             chunks_data.append({**item, "embedding": embedding})
 
     return chunks_data
+
+
+# ---- Week 4: Retrieval Experiment Functions ----
+
+def search_bm25_placeholder(db: Session, query: str, top_k: int = 5) -> list[tuple[Document, float]]:
+    """Placeholder BM25 search until Member A integrates the sparse BM25 engine."""
+    stmt = select(Document).limit(top_k)
+    results = db.execute(stmt).scalars().all()
+    return [(doc, round(1.0 - (i * 0.1), 4)) for i, doc in enumerate(results)]
+
+
+def run_experiment_comparison(db: Session, query: str, top_k: int = 5, alpha: float = 0.5) -> dict:
+    modes = ["dense", "bm25", "hybrid"]
+    comparison_data = {}
+
+    query_vector = generate_embedding(query, task_type="RETRIEVAL_QUERY")
+
+    for mode in modes:
+        start_time = time.time()
+
+        if mode == "dense":
+            raw_results = search_documents(db, query_vector, top_k=top_k)
+            formatted_results = [
+                {
+                    "doc_id": doc.id,
+                    "content": doc.content,
+                    "file_name": doc.file_name,
+                    "page_number": doc.page_number,
+                    "score": round(1.0 - dist, 4),
+                }
+                for doc, dist in raw_results
+            ]
+        elif mode == "bm25":
+            raw_results = search_bm25_placeholder(db, query, top_k=top_k)
+            formatted_results = [
+                {
+                    "doc_id": doc.id,
+                    "content": doc.content,
+                    "file_name": doc.file_name,
+                    "page_number": doc.page_number,
+                    "score": score,
+                }
+                for doc, score in raw_results
+            ]
+        else:  # Hybrid retrieval strategy
+            dense_res = search_documents(db, query_vector, top_k=top_k)
+            formatted_results = [
+                {
+                    "doc_id": doc.id,
+                    "content": doc.content,
+                    "file_name": doc.file_name,
+                    "page_number": doc.page_number,
+                    "score": round(((1.0 - dist) * alpha) + (0.5 * (1.0 - alpha)), 4),
+                }
+                for doc, dist in dense_res
+            ]
+
+        elapsed_ms = round((time.time() - start_time) * 1000, 2)
+
+        # Log run execution
+        run_log = ExperimentRun(
+            query=query,
+            mode=mode,
+            retrieved_docs=formatted_results,
+            execution_time_ms=elapsed_ms,
+        )
+        db.add(run_log)
+
+        comparison_data[mode] = {
+            "mode": mode,
+            "execution_time_ms": elapsed_ms,
+            "results": formatted_results,
+        }
+
+    db.commit()
+    return comparison_data

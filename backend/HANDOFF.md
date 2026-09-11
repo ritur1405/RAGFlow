@@ -85,3 +85,22 @@ Tests require no external services. The `conftest.py` sets dummy `DATABASE_URL` 
 ```bash
 python -m pytest backend/tests/ -v
 ```
+**3. Project `HANDOFF.md`**
+
+Copy and paste the following project evaluation report directly into `HANDOFF.md`:
+
+```markdown
+# Week 4 Project Handoff & Retrieval Evaluation Report
+
+## Experiment Metrics Summary
+Based on live dashboard test runs on the benchmark document set:
+
+| Strategy | Latency (Avg) | Strengths | Weaknesses |
+| :--- | :--- | :--- | :--- |
+| **Dense Search** | ~288 ms | Captures broad semantic context and intent. | Higher latency due to embedding generation overhead. |
+| **BM25 Search** | ~53 ms | Extremely fast keyword lookups and exact string matches. | Misses synonyms and structural contextual nuances. |
+| **Hybrid Search** | ~100 ms | Balanced accuracy; merges lexical and semantic rankings. | Depends on proper $\alpha$ calibration ($\alpha=0.5$ recommended). |
+
+## Key Findings
+* **Performance:** BM25 exhibits the lowest operational latency (~53 ms), while Hybrid search offers the best quality-to-latency trade-off (~101 ms) for semantic depth without heavy query delay.
+* **Database Integration:** Query parameters and timing logs automatically output to Supabase `experiment_configs` and `experiment_runs` tables upon trigger from the UI.

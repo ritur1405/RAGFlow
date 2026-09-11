@@ -1,5 +1,5 @@
 import re
-from typing import Optional
+from typing import Optional, List, Dict
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -55,3 +55,44 @@ class QueryResponse(BaseModel):
     question: str
     answer: str
     sources: list[DocumentChunkOut]
+
+
+# ---- Week 4: Experiment API & Comparison Schemas ----
+
+class ExperimentConfigCreate(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    retrieval_mode: str = Field(..., description="Mode must be 'dense', 'bm25', or 'hybrid'")
+    top_k: int = Field(default=5, ge=1, le=20)
+    alpha: float = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class ExperimentConfigResponse(ExperimentConfigCreate):
+    id: int
+
+    class Config:
+        from_attributes = True
+
+
+class RetrievalCompareRequest(BaseModel):
+    query: str = Field(..., min_length=3, max_length=1000)
+    top_k: Optional[int] = Field(default=5, ge=1, le=20)
+    alpha: Optional[float] = Field(default=0.5, ge=0.0, le=1.0)
+
+
+class RetrievalResultItem(BaseModel):
+    doc_id: int
+    content: str
+    file_name: Optional[str] = None
+    page_number: Optional[int] = None
+    score: float
+
+
+class ModeComparisonResult(BaseModel):
+    mode: str
+    execution_time_ms: float
+    results: List[RetrievalResultItem]
+
+
+class CompareResponse(BaseModel):
+    query: str
+    comparisons: Dict[str, ModeComparisonResult]
