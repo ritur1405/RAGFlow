@@ -94,3 +94,139 @@ class TestGenerateEmbeddingsBatch:
 
         with pytest.raises(ValueError, match="Failed to generate embeddings"):
             generate_embeddings_batch(["t1"], batch_size=100)
+
+
+# ---------------------------------------------------------------------------
+# search_documents — dense retrieval with pgvector
+# ---------------------------------------------------------------------------
+
+from app.services import search_documents, EMBEDDING_DIM
+
+
+def _make_db_row(id, title, content, file_name, page_number, chunk_index, distance):
+    """Creates a MagicMock that behaves like a SQLAlchemy Row."""
+    row = MagicMock()
+    row.id = id
+    row.title = title
+    row.content = content
+    row.file_name = file_name
+    row.page_number = page_number
+    row.chunk_index = chunk_index
+    row.distance = distance
+    return row
+
+
+def _make_query_vector(dim=EMBEDDING_DIM, value=0.01):
+    """Creates a dummy query vector of the correct dimensionality."""
+    return [value] * dim
+
+
+class TestSearchDocuments:
+    """Tests for dense retrieval via search_documents."""
+
+    def _mock_db(self, rows):
+        """Returns a mock Session whose .execute().fetchall() yields rows."""
+        db = MagicMock()
+        db.execute.return_value.fetchall.return_value = rows
+        return db
+
+    def test_returns_documents_with_distance(self):
+        """Basic retrieval: one row → one (Document, distance) pair."""
+        row = _make_db_row(
+            id=1, title="T1", content="Hello world",
+            file_name="a.pdf", page_number=1, chunk_index=0, distance=0.12,
+        )
+        db = self._mock_db([row])
+
+        results = search_documents(db, _make_query_vector(), top_k=3)
+
+        assert len(results) == 1
+        doc, dist = results[0]
+        assert doc.id == 1
+        assert doc.content == "Hello world"
+        assert doc.file_name == "a.pdf"
+        assert doc.page_number == 1
+        assert doc.chunk_index == 0
+        assert dist == pytest.approx(0.12)
+
+    def test_preserves_all_metadata_fields(self):
+        """Verifies that every metadata field round-trips through the function."""
+        row = _make_db_row(
+            id=42, title="Report (Page 3, Chunk 7)",
+            content="Some PDF text here",
+            file_name="report.pdf", page_number=3, chunk_index=7, distance=0.05,
+        )
+        db = self._mock_db([row])
+
+        results = search_documents(db, _make_query_vector(), top_k=1)
+
+        doc, dist = results[0]
+        assert doc.id == 42
+        assert doc.title == "Report (Page 3, Chunk 7)"
+        assert doc.content == "Some PDF text here"
+        assert doc.file_name == "report.pdf"
+        assert doc.page_number == 3
+        assert doc.chunk_index == 7
+        assert dist == pytest.approx(0.05)
+
+    def test_results_ordered_by_distance(self):
+        """Results come back in ascending distance (most similar first)."""
+        rows = [
+            _make_db_row(1, "T1", "c1", "a.pdf", 1, 0, 0.05),
+            _make_db_row(2, "T2", "c2", "a.pdf", 1, 1, 0.15),
+            _make_db_row(3, "T3", "c3", "a.pdf", 2, 2, 0.30),
+        ]
+        db = self._mock_db(rows)
+
+        results = search_documents(db, _make_query_vector(), top_k=3)
+
+        distances = [dist for _, dist in results]
+        assert distances == sorted(distances)
+
+    def test_top_k_limits_result_count(self):
+        """SQL LIMIT :top_k should restrict how many rows are returned."""
+        rows = [_make_db_row(i, f"T{i}", f"c{i}", "f.pdf", 1, i, 0.1 * i) for i in range(2)]
+        db = self._mock_db(rows)
+
+        results = search_documents(db, _make_query_vector(), top_k=2)
+        assert len(results) == 2
+
+        # Verify top_k was actually passed to the SQL query
+        call_args = db.execute.call_args
+        assert call_args[0][1]["top_k"] == 2
+
+    def test_empty_result_returns_empty_list(self):
+        """No matching rows → empty list, not an error."""
+        db = self._mock_db([])
+        results = search_documents(db, _make_query_vector(), top_k=5)
+        assert results == []
+
+    # --- Validation tests ---
+
+    def test_raises_on_top_k_zero(self):
+        db = self._mock_db([])
+        with pytest.raises(ValueError, match="top_k must be an integer between 1 and 100"):
+            search_documents(db, _make_query_vector(), top_k=0)
+
+    def test_raises_on_top_k_negative(self):
+        db = self._mock_db([])
+        with pytest.raises(ValueError, match="top_k must be an integer between 1 and 100"):
+            search_documents(db, _make_query_vector(), top_k=-5)
+
+    def test_raises_on_top_k_over_limit(self):
+        db = self._mock_db([])
+        with pytest.raises(ValueError, match="top_k must be an integer between 1 and 100"):
+            search_documents(db, _make_query_vector(), top_k=101)
+
+    def test_raises_on_wrong_vector_dimensions(self):
+        db = self._mock_db([])
+        bad_vector = [0.1] * 512  # 512 != 768
+        with pytest.raises(ValueError, match="must have 768 dimensions"):
+            search_documents(db, bad_vector, top_k=3)
+
+    def test_default_top_k_is_3(self):
+        """Calling without top_k should default to 3."""
+        db = self._mock_db([])
+        search_documents(db, _make_query_vector())
+        call_args = db.execute.call_args
+        assert call_args[0][1]["top_k"] == 3

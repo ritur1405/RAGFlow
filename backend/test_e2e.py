@@ -1,11 +1,12 @@
 """
 test_e2e.py — RAGFlow end-to-end integration check.
 
-Runs the full pipeline against your real app, database, and Gemini API:
+Benchmarks the RAG pipeline on the full request cycle:
   1. Upload a PDF          -> POST /documents/upload/
   2. Confirm ingestion      -> GET  /documents/
-  3. Ask a specific question -> POST /query/  (exercises pgvector search + threshold fallback)
-  4. Ask a broad question    -> POST /query/  (exercises the meta-question / summary path)
+  3. Ask a specific question -> POST /query/       (default dense retrieval)
+  4. Ask via /query/dense    -> POST /query/dense   (explicit dense retrieval)
+  5. Ask a broad question    -> POST /query/        (meta-question / summary path)
 
 This uses FastAPI's TestClient, so it runs the app in-process — no need to
 have `uvicorn` running separately. It DOES make real calls to Gemini and your
@@ -36,7 +37,7 @@ client = TestClient(app)
 
 
 def upload_pdf(pdf_path: str) -> dict:
-    print(f"\n[1/4] Uploading PDF: {pdf_path}")
+    print(f"\n[1/5] Uploading PDF: {pdf_path}")
     if not os.path.exists(pdf_path):
         print(f"ERROR: file not found at {pdf_path}")
         sys.exit(1)
@@ -57,7 +58,7 @@ def upload_pdf(pdf_path: str) -> dict:
 
 
 def confirm_ingestion(expected_min_chunks: int = 1) -> list[dict]:
-    print("\n[2/4] Confirming ingested documents via GET /documents/")
+    print("\n[2/5] Confirming ingested documents via GET /documents/")
     response = client.get("/documents/")
 
     if response.status_code != 200:
@@ -70,12 +71,35 @@ def confirm_ingestion(expected_min_chunks: int = 1) -> list[dict]:
     if len(docs) < expected_min_chunks:
         print("WARNING: fewer chunks than expected — ingestion may be incomplete.")
 
+    # Verify new metadata fields exist in the response
+    if docs:
+        sample = docs[0]
+        has_file_name = "file_name" in sample
+        print(f"  file_name field present: {has_file_name}")
+
     return docs
 
 
-def ask_question(question: str, label: str) -> dict:
-    print(f"\n{label} Asking: \"{question}\"")
-    response = client.post("/query/", json={"question": question})
+def _print_sources(data: dict) -> None:
+    """Pretty-prints the sources from a query response."""
+    if data["sources"]:
+        print("Sources cited:")
+        for src in data["sources"]:
+            score_str = ""
+            if src.get("relevance_score") is not None:
+                score_str = f", score={src['relevance_score']:.4f}"
+            print(
+                f"  - {src['title']} "
+                f"(file={src.get('file_name')}, page={src.get('page_number')}, "
+                f"chunk={src.get('chunk_index')}{score_str})"
+            )
+    else:
+        print("Sources cited: none")
+
+
+def ask_question(question: str, label: str, endpoint: str = "/query/") -> dict:
+    print(f"\n{label} [{endpoint}] Asking: \"{question}\"")
+    response = client.post(endpoint, json={"question": question})
 
     if response.status_code != 200:
         print(f"FAILED — status {response.status_code}: {response.text}")
@@ -83,17 +107,7 @@ def ask_question(question: str, label: str) -> dict:
 
     data = response.json()
     print(f"Answer: {data['answer']}")
-
-    if data["sources"]:
-        print("Sources cited:")
-        for src in data["sources"]:
-            print(
-                f"  - {src['title']} "
-                f"(page {src.get('page_number')}, chunk {src.get('chunk_index')})"
-            )
-    else:
-        print("Sources cited: none")
-
+    _print_sources(data)
     return data
 
 
@@ -116,17 +130,20 @@ def main():
         sys.exit(1)
 
     print("=" * 70)
-    print("RAGFlow End-to-End Integration Check")
+    print("RAGFlow End-to-End Integration Check (Week 3)")
     print("=" * 70)
 
     upload_pdf(args.pdf)
     confirm_ingestion()
 
-    # Specific-fact question -> exercises pgvector search + grounded answer + citations
-    ask_question(args.question, "[3/4]")
+    # Default query (dense retrieval)
+    ask_question(args.question, "[3/5]", "/query/")
+
+    # Explicit dense retrieval endpoint
+    ask_question(args.question, "[4/5]", "/query/dense")
 
     # Broad question -> exercises the meta-question / full-document summary path
-    ask_question("What is the main topic discussed in this document?", "[4/4]")
+    ask_question("What is the main topic discussed in this document?", "[5/5]", "/query/")
 
     print("\n" + "=" * 70)
     print("End-to-end check complete.")

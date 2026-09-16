@@ -14,8 +14,10 @@ class DocumentChunkOut(BaseModel):
     id: int
     title: str
     content: str
+    file_name: Optional[str] = None
     chunk_index: Optional[int] = None
     page_number: Optional[int] = None
+    relevance_score: Optional[float] = None
 
 
 class IngestionResponse(BaseModel):
@@ -36,6 +38,12 @@ class QueryRequest(BaseModel):
         min_length=3,
         max_length=1000,
         description="The user's natural-language question about ingested documents.",
+    )
+    top_k: int = Field(
+        default=3,
+        ge=1,
+        le=20,
+        description="Number of top matching chunks to retrieve.",
     )
 
     @field_validator("question")

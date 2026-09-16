@@ -15,6 +15,7 @@ from app.services import (
     MAX_RELEVANT_DISTANCE,
     NO_ANSWER_MESSAGE,
 )
+
 from app.utils import chunk_text
 from app.schemas import (
     DocumentCreate,
@@ -93,6 +94,7 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
                 id=d.id,
                 title=d.title,
                 content=d.content,
+                file_name=getattr(d, "file_name", None),
                 chunk_index=d.chunk_index,
                 page_number=getattr(d, "page_number", None),
             )
@@ -166,6 +168,7 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
                 id=d.id,
                 title=d.title,
                 content=d.content,
+                file_name=d.file_name,
                 chunk_index=d.chunk_index,
                 page_number=d.page_number,
             )
@@ -183,6 +186,7 @@ def list_documents(db: Session = Depends(get_db)):
             id=d.id,
             title=d.title,
             content=d.content,
+            file_name=getattr(d, "file_name", None),
             chunk_index=getattr(d, "chunk_index", None),
             page_number=getattr(d, "page_number", None),
         )
@@ -202,60 +206,95 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
     return {"message": f"Document ID {doc_id} successfully deleted."}
 
 
-@app.post("/query/", response_model=QueryResponse)
-def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
-    """Performs vector similarity search over chunks and uses Gemini to answer using context.
+# ---------------------------------------------------------------------------
+# Helpers shared by all /query/* endpoints
+# ---------------------------------------------------------------------------
 
-    - Broad/summary-style questions bypass vector search and use the whole document.
-    - Specific questions use top-k pgvector search, but fall back to a fixed
-      "cannot find" message if nothing beats MAX_RELEVANT_DISTANCE, rather than
-      forcing Gemini to answer from irrelevant chunks.
-    - request.question is already validated/sanitized by QueryRequest (schemas.py):
-      length-bounded and stripped of control characters.
-    """
-    if is_meta_question(request.question):
-        answer, relevant_docs = generate_summary_answer(db, request.question)
-        return QueryResponse(
-            question=request.question,
-            answer=answer,
-            sources=[
-                DocumentChunkOut(
-                    id=doc.id,
-                    title=doc.title,
-                    content=doc.content,
-                    chunk_index=getattr(doc, "chunk_index", None),
-                    page_number=getattr(doc, "page_number", None),
-                )
-                for doc in relevant_docs
-            ],
-        )
+def _build_source_out(
+    doc: Document,
+    relevance_score: float | None = None,
+) -> DocumentChunkOut:
+    """Builds a DocumentChunkOut from a Document + optional score."""
+    return DocumentChunkOut(
+        id=doc.id,
+        title=doc.title,
+        content=doc.content,
+        file_name=getattr(doc, "file_name", None),
+        chunk_index=getattr(doc, "chunk_index", None),
+        page_number=getattr(doc, "page_number", None),
+        relevance_score=round(relevance_score, 4) if relevance_score is not None else None,
+    )
 
-    query_vector = generate_embedding(request.question, task_type="RETRIEVAL_QUERY")
-    scored_docs = search_documents(db, query_vector, top_k=3)
+
+def _handle_meta_question(
+    db: Session, question: str
+) -> QueryResponse | None:
+    """Returns a QueryResponse for summary-style questions, or None if not applicable."""
+    if not is_meta_question(question):
+        return None
+
+    answer, relevant_docs = generate_summary_answer(db, question)
+    return QueryResponse(
+        question=question,
+        answer=answer,
+        sources=[_build_source_out(doc) for doc in relevant_docs],
+    )
+
+
+def _dense_search_and_answer(
+    db: Session, question: str, top_k: int
+) -> QueryResponse:
+    """Core dense-retrieval query flow: embed → search → threshold → generate."""
+    query_vector = generate_embedding(question, task_type="RETRIEVAL_QUERY")
+    scored_docs = search_documents(db, query_vector, top_k=top_k)
 
     # Fallback: no chunks at all, or nothing close enough to be trustworthy.
     if not scored_docs or scored_docs[0][1] > MAX_RELEVANT_DISTANCE:
         return QueryResponse(
-            question=request.question,
+            question=question,
             answer=NO_ANSWER_MESSAGE,
             sources=[],
         )
 
-    relevant_docs = [doc for doc, distance in scored_docs]
-    context_list = [doc.content for doc in relevant_docs]
-    answer = generate_answer(request.question, context_list)
+    relevant_docs = [doc for doc, _dist in scored_docs]
+    answer = generate_answer(question, relevant_docs)
 
     return QueryResponse(
-        question=request.question,
+        question=question,
         answer=answer,
         sources=[
-            DocumentChunkOut(
-                id=doc.id,
-                title=doc.title,
-                content=doc.content,
-                chunk_index=getattr(doc, "chunk_index", None),
-                page_number=getattr(doc, "page_number", None),
-            )
-            for doc in relevant_docs
+            _build_source_out(doc, relevance_score=1 - dist)
+            for doc, dist in scored_docs
         ],
     )
+
+
+
+
+
+# ---------------------------------------------------------------------------
+# Query endpoints
+# ---------------------------------------------------------------------------
+
+@app.post("/query/", response_model=QueryResponse)
+def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
+    """Default RAG query — uses dense (vector) retrieval.
+
+    - Broad/summary-style questions bypass vector search and use the whole document.
+    - Specific questions use top-k pgvector cosine search, but fall back to a fixed
+      "cannot find" message if nothing beats MAX_RELEVANT_DISTANCE.
+    - request.question is validated/sanitized by QueryRequest (schemas.py).
+    """
+    meta = _handle_meta_question(db, request.question)
+    if meta is not None:
+        return meta
+    return _dense_search_and_answer(db, request.question, request.top_k)
+
+
+@app.post("/query/dense", response_model=QueryResponse)
+def query_dense(request: QueryRequest, db: Session = Depends(get_db)):
+    """Explicit dense (vector) retrieval endpoint for benchmarking."""
+    meta = _handle_meta_question(db, request.question)
+    if meta is not None:
+        return meta
+    return _dense_search_and_answer(db, request.question, request.top_k)
