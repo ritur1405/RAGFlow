@@ -34,7 +34,7 @@ app = FastAPI(title="RAGFlow Backend")
 # Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production (e.g. ["http://localhost:3000"])
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -83,7 +83,8 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
         db.add(db_doc)
         created_docs.append(db_doc)
 
-    db.commit()
+    if not results:
+        return QueryResponse(answer=NO_ANSWER_MESSAGE, retrieved_docs=[])
 
     for d in created_docs:
         db.refresh(d)
@@ -271,31 +272,3 @@ def _dense_search_and_answer(
             if doc.id in included_source_ids
         ],
     )
-
-
-
-
-
-# ---------------------------------------------------------------------------
-# Query endpoints
-# ---------------------------------------------------------------------------
-
-@app.post("/query/", response_model=QueryResponse)
-def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
-    """Default RAG query — uses dense (vector) retrieval.
-
-    - Broad/summary-style questions bypass vector search and use the whole document.
-    - Specific questions use top-k pgvector cosine search, but fall back to a fixed
-      "cannot find" message if nothing beats MAX_RELEVANT_DISTANCE.
-    - request.question is validated/sanitized by QueryRequest (schemas.py).
-    """
-    meta = _handle_meta_question(db, request.question)
-    if meta is not None:
-        return meta
-    return _dense_search_and_answer(db, request.question, request.top_k)
-
-
-@app.post("/query/dense", response_model=QueryResponse)
-def query_dense(request: QueryRequest, db: Session = Depends(get_db)):
-    """Explicit dense (vector) retrieval endpoint for benchmarking."""
-    return _dense_search_and_answer(db, request.question, request.top_k)
