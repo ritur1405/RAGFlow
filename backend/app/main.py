@@ -294,7 +294,4 @@ def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
 @app.post("/query/dense", response_model=QueryResponse)
 def query_dense(request: QueryRequest, db: Session = Depends(get_db)):
     """Explicit dense (vector) retrieval endpoint for benchmarking."""
-    meta = _handle_meta_question(db, request.question)
-    if meta is not None:
-        return meta
     return _dense_search_and_answer(db, request.question, request.top_k)
