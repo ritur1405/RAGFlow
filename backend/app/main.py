@@ -37,6 +37,22 @@ app.add_middleware(
 def read_root():
     return {"status": "ok", "message": "RAGFlow API is running"}
 
+    chunks = chunk_text(doc.content, chunk_size=500, chunk_overlap=50)
+    created_docs = []
+
+    for i, chunk in enumerate(chunks):
+        embedding = generate_embedding(chunk, task_type="RETRIEVAL_DOCUMENT")
+        db_doc = Document(
+            title=f"{doc.title} (Chunk {i+1})",
+            content=chunk,
+            embedding=embedding,
+            chunk_index=i,
+        )
+        db.add(db_doc)
+        created_docs.append(db_doc)
+
+    if not results:
+        return QueryResponse(answer=NO_ANSWER_MESSAGE, retrieved_docs=[])
 
 @app.post("/upload/")
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -117,4 +133,17 @@ def query_rag_stream(payload: QueryRequest, db: Session = Depends(get_db)):
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
-    return StreamingResponse(event_generator(), media_type="text/event-stream")
+    return QueryResponse(
+        question=request.question,
+        answer=answer,
+        sources=[
+            DocumentChunkOut(
+                id=doc.id,
+                title=doc.title,
+                content=doc.content,
+                chunk_index=getattr(doc, "chunk_index", None),
+                page_number=getattr(doc, "page_number", None),
+            )
+            for doc in relevant_docs
+        ],
+    )
