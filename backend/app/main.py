@@ -32,7 +32,7 @@ app = FastAPI(title="RAGFlow Backend")
 # Enable CORS for frontend integration
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Adjust for production (e.g. ["http://localhost:3000"])
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -81,7 +81,8 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
         db.add(db_doc)
         created_docs.append(db_doc)
 
-    db.commit()
+    if not results:
+        return QueryResponse(answer=NO_ANSWER_MESSAGE, retrieved_docs=[])
 
     for d in created_docs:
         db.refresh(d)

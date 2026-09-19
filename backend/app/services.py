@@ -1,5 +1,8 @@
 import io
 import os
+import time
+from typing import Generator
+
 from google import genai
 from google.genai import types
 from pypdf import PdfReader
@@ -39,6 +42,29 @@ def generate_embedding(text_content: str, task_type: str = "RETRIEVAL_DOCUMENT")
     return response.embeddings[0].values
 
 
+def generate_embeddings_batch(
+    texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", batch_size: int = 50
+) -> list[list[float]]:
+    """Generates vector embeddings for a list of strings in batches to stay within payload limits."""
+    if not texts:
+        return []
+
+    all_embeddings = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        response = client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=batch,
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=EMBEDDING_DIM,
+            ),
+        )
+        all_embeddings.extend([e.values for e in response.embeddings])
+
+    return all_embeddings
+
+
 def search_documents(
     db: Session, query_vector: list[float], top_k: int = 3
 ) -> list[tuple[Document, float]]:
@@ -59,6 +85,7 @@ def search_documents(
         LIMIT :top_k
     """)
 
+    vector_str = f"[{','.join(map(str, query_vector))}]"
     results = db.execute(sql, {"vector": vector_str, "top_k": top_k}).fetchall()
 
     return [
@@ -215,30 +242,55 @@ def generate_embeddings_batch(
 ) -> list[list[float]]:
     """Generates 768-dimensional vector embeddings for a list of strings in batches.
 
-    Splits the texts into safe chunk batches to avoid request size/limit errors.
-    """
-    if not texts:
+    context_text = "\n\n".join(context_parts)
+    prompt = f"""You are a strictly document-grounded assistant. Answer using ONLY the document content given below.
+Do not use outside knowledge. Do not speculate. If the document content does not contain
+enough information to answer, respond with exactly: "{NO_ANSWER_MESSAGE}"
+
+Document content (reading order):
+{context_text}
+
+Question: {question}
+
+Answer:"""
+
+    response = client.models.generate_content(
+        model=LLM_MODEL,
+        contents=prompt,
+    )
+    return response.text, used_docs
+
+
+def process_pdf(file_contents: bytes) -> list[dict]:
+    """Extracts text from raw PDF bytes, chunks it in batch, generates embeddings, and returns dictionaries."""
+    reader = PdfReader(io.BytesIO(file_contents))
+    pending_chunks: list[dict] = []
+    chunk_global_index = 0
+
+    for page_idx, page in enumerate(reader.pages):
+        text_content = page.extract_text()
+        if not text_content or not text_content.strip():
+            continue
+
+        page_chunks = chunk_text(text_content, chunk_size=500, chunk_overlap=50)
+
+        for chunk_str in page_chunks:
+            pending_chunks.append({
+                "text": chunk_str,
+                "page_number": page_idx + 1,
+                "chunk_index": chunk_global_index,
+            })
+            chunk_global_index += 1
+
+    if not pending_chunks:
         return []
 
-    embeddings = []
-    for i in range(0, len(texts), batch_size):
-        batch = texts[i : i + batch_size]
-        response = client.models.embed_content(
-            model=EMBEDDING_MODEL,
-            contents=batch,
-            config=types.EmbedContentConfig(
-                task_type=task_type,
-                output_dimensionality=EMBEDDING_DIM,
-            ),
-        )
-        if not response.embeddings or len(response.embeddings) != len(batch):
-            raise ValueError(
-                f"Failed to generate embeddings for batch. Expected {len(batch)}, "
-                f"got {len(response.embeddings) if response.embeddings else 0}."
-            )
+    texts_in_batch = [item["text"] for item in pending_chunks]
+    embeddings = generate_embeddings_batch(texts_in_batch, task_type="RETRIEVAL_DOCUMENT")
 
-        for emb in response.embeddings:
-            embeddings.append(emb.values)
+    chunks_data: list[dict] = []
+    for item, embedding in zip(pending_chunks, embeddings):
+        chunks_data.append({**item, "embedding": embedding})
 
     return embeddings
 main

@@ -9,3 +9,18 @@ node_modules/
 build/
 dist/
 .DS_Store
+
+.venv/
+__pycache__/
+.env
+*.pyc
+.DS_Store
+
+# macOS system files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
