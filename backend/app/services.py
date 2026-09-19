@@ -352,12 +352,16 @@ Answer:"""
 # LLM answer generation (uses build_context + build_rag_prompt)
 # ---------------------------------------------------------------------------
 
-def generate_answer(question: str, context_docs: list[Document]) -> str:
+def generate_answer(
+    question: str,
+    context_docs: list[Document],
+    context_result: ContextResult | None = None,
+) -> str:
     """Synthesizes a strictly grounded RAG response using Gemini.
 
     Pipeline: chunks → :func:`build_context` → :func:`build_rag_prompt` → LLM.
     """
-    ctx = build_context(context_docs)
+    ctx = context_result or build_context(context_docs)
     prompt = build_rag_prompt(question, ctx.context_text)
 
     response = client.models.generate_content(

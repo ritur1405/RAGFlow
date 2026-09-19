@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.database import Base, engine, get_db
 from app.models import Document
 from app.services import (
+    build_context,
     generate_answer,
     generate_embedding,
     search_documents,
@@ -257,7 +258,9 @@ def _dense_search_and_answer(
         )
 
     relevant_docs = [doc for doc, _dist in scored_docs]
-    answer = generate_answer(question, relevant_docs)
+    context_result = build_context(relevant_docs)
+    answer = generate_answer(question, relevant_docs, context_result=context_result)
+    included_source_ids = {source.id for source in context_result.sources}
 
     return QueryResponse(
         question=question,
@@ -265,6 +268,7 @@ def _dense_search_and_answer(
         sources=[
             _build_source_out(doc, relevance_score=1 - dist)
             for doc, dist in scored_docs
+            if doc.id in included_source_ids
         ],
     )
 

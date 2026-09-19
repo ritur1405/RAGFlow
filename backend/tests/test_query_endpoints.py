@@ -78,6 +78,25 @@ def test_query_with_sources_returns_full_metadata(mock_embed, mock_generate, moc
 
 
 @patch("app.main.search_documents")
+@patch("app.main.generate_answer")
+@patch("app.main.generate_embedding")
+def test_query_sources_match_context_budget(mock_embed, mock_generate, mock_search):
+    """Verifies that sources include only chunks that fit in the LLM context."""
+    mock_embed.return_value = [0.1] * 768
+    mock_generate.return_value = "Answer from first source."
+
+    mock_doc_1 = _make_mock_doc(id=1, content="A" * 7000, file_name="doc.pdf")
+    mock_doc_2 = _make_mock_doc(id=2, content="B" * 7000, file_name="doc.pdf")
+    mock_search.return_value = [(mock_doc_1, 0.1), (mock_doc_2, 0.2)]
+
+    response = client.post("/query/", json={"question": "What is the answer?"})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [source["id"] for source in data["sources"]] == [1]
+
+
+@patch("app.main.search_documents")
 @patch("app.main.generate_embedding")
 def test_query_with_no_relevant_documents(mock_embed, mock_search):
     """Verifies that an empty retrieval safely returns the fallback message and empty sources."""
