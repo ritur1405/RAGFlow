@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 from app.models import Document, ExperimentRun
 from app.utils import chunk_text
 
-# Initialize Gemini Client (reads GEMINI_API_KEY from environment)
+# Initialize Gemini Client
 client = genai.Client()
 
 EMBEDDING_MODEL = "text-embedding-004"
@@ -44,7 +44,7 @@ def is_meta_question(question: str) -> bool:
 
 
 def generate_embedding(text_content: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
-    """Generates 768-dimensional vector embeddings."""
+    """Generates a single 768-dimensional vector embedding."""
     response = client.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text_content,
@@ -59,7 +59,7 @@ def generate_embedding(text_content: str, task_type: str = "RETRIEVAL_DOCUMENT")
 def generate_embeddings_batch(
     texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", batch_size: int = 50
 ) -> list[list[float]]:
-    """Generates vector embeddings for a list of strings in batches."""
+    """Generates vector embeddings for a list of strings in batches to stay within payload limits."""
     if not texts:
         return []
 
@@ -110,11 +110,12 @@ def search_documents(
     ]
 
 
-def _build_grounded_prompt(question: str, context_docs: list[Document]) -> str:
+def generate_answer(question: str, context_docs: list[Document]) -> str:
+    """Synthesizes a strictly grounded RAG response using Gemini based on retrieved docs."""
     context_blocks = [doc.content for doc in context_docs if doc.content]
     context_text = "\n\n".join(context_blocks)
 
-    return f"""You are a strictly document-grounded assistant. Follow these rules exactly:
+    prompt = f"""You are a strictly document-grounded assistant. Follow these rules exactly:
 
 1. Answer using ONLY the information in the "Context" section below.
 2. Do not use outside knowledge, training data, or assumptions beyond what is stated in the context.
@@ -130,10 +131,6 @@ Question: {question}
 
 Answer:"""
 
-
-def generate_answer(question: str, context_docs: list[Document]) -> str:
-    """Synthesizes a strictly grounded RAG response using Gemini based on retrieved docs."""
-    prompt = _build_grounded_prompt(question, context_docs)
     response = client.models.generate_content(
         model=LLM_MODEL,
         contents=prompt,
@@ -226,77 +223,3 @@ def process_pdf(file_contents: bytes) -> list[dict]:
         chunks_data.append({**item, "embedding": embedding})
 
     return chunks_data
-
-
-def search_bm25_placeholder(db: Session, query: str, top_k: int = 5) -> list[tuple[Document, float]]:
-    """Placeholder BM25 search until sparse engine integration."""
-    stmt = select(Document).limit(top_k)
-    results = db.execute(stmt).scalars().all()
-    return [(doc, round(1.0 - (i * 0.1), 4)) for i, doc in enumerate(results)]
-
-
-def run_experiment_comparison(db: Session, query: str, top_k: int = 5, alpha: float = 0.5) -> dict:
-    """Executes dense, bm25, and hybrid retrievals side-by-side and logs run metrics."""
-    modes = ["dense", "bm25", "hybrid"]
-    comparison_data = {}
-
-    query_vector = generate_embedding(query, task_type="RETRIEVAL_QUERY")
-
-    for mode in modes:
-        start_time = time.time()
-
-        if mode == "dense":
-            raw_results = search_documents(db, query_vector, top_k=top_k)
-            formatted_results = [
-                {
-                    "doc_id": doc.id,
-                    "content": doc.content,
-                    "file_name": getattr(doc, "title", "document"),
-                    "page_number": doc.page_number,
-                    "score": round(1.0 - dist, 4),
-                }
-                for doc, dist in raw_results
-            ]
-        elif mode == "bm25":
-            raw_results = search_bm25_placeholder(db, query, top_k=top_k)
-            formatted_results = [
-                {
-                    "doc_id": doc.id,
-                    "content": doc.content,
-                    "file_name": getattr(doc, "title", "document"),
-                    "page_number": doc.page_number,
-                    "score": score,
-                }
-                for doc, score in raw_results
-            ]
-        else:  # Hybrid retrieval strategy
-            dense_res = search_documents(db, query_vector, top_k=top_k)
-            formatted_results = [
-                {
-                    "doc_id": doc.id,
-                    "content": doc.content,
-                    "file_name": getattr(doc, "title", "document"),
-                    "page_number": doc.page_number,
-                    "score": round(((1.0 - dist) * alpha) + (0.5 * (1.0 - alpha)), 4),
-                }
-                for doc, dist in dense_res
-            ]
-
-        elapsed_ms = round((time.time() - start_time) * 1000, 2)
-
-        run_log = ExperimentRun(
-            query=query,
-            mode=mode,
-            retrieved_docs=formatted_results,
-            execution_time_ms=elapsed_ms,
-        )
-        db.add(run_log)
-
-        comparison_data[mode] = {
-            "mode": mode,
-            "execution_time_ms": elapsed_ms,
-            "results": formatted_results,
-        }
-
-    db.commit()
-    return comparison_data
