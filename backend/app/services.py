@@ -1,25 +1,25 @@
 import io
 import os
+import time
 from typing import Generator
 
 from google import genai
 from google.genai import types
 from pypdf import PdfReader
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.models import Document
+from app.models import Document, ExperimentRun
 from app.utils import chunk_text
 
-# Initialize Gemini Client (reads GEMINI_API_KEY from environment)
+# Initialize Gemini Client
 client = genai.Client()
 
-# Dynamic model selection from environment variables with defaults
-EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-001")
-LLM_MODEL = os.getenv("LLM_MODEL", "gemini-3.6-flash")
+EMBEDDING_MODEL = "text-embedding-004"
+LLM_MODEL = "gemini-1.5-flash"
 EMBEDDING_DIM = 768
 
-MAX_RELEVANT_DISTANCE = 0.5
+MAX_RELEVANT_DISTANCE = 0.8
 NO_ANSWER_MESSAGE = "I cannot find relevant information in the provided documents."
 
 META_QUESTION_KEYWORDS = [
@@ -37,7 +37,14 @@ META_QUESTION_KEYWORDS = [
 ]
 
 
+def is_meta_question(question: str) -> bool:
+    """Heuristic check for broad/summary-style questions vs. specific-fact lookups."""
+    q = question.lower()
+    return any(keyword in q for keyword in META_QUESTION_KEYWORDS)
+
+
 def generate_embedding(text_content: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
+    """Generates a single 768-dimensional vector embedding."""
     response = client.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text_content,
@@ -50,98 +57,65 @@ def generate_embedding(text_content: str, task_type: str = "RETRIEVAL_DOCUMENT")
 
 
 def generate_embeddings_batch(
-    texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT"
+    texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", batch_size: int = 50
 ) -> list[list[float]]:
+    """Generates vector embeddings for a list of strings in batches to stay within payload limits."""
     if not texts:
         return []
 
-    response = client.models.embed_content(
-        model=EMBEDDING_MODEL,
-        contents=texts,
-        config=types.EmbedContentConfig(
-            task_type=task_type,
-            output_dimensionality=EMBEDDING_DIM,
-        ),
-    )
-    return [e.values for e in response.embeddings]
+    all_embeddings = []
+    for i in range(0, len(texts), batch_size):
+        batch = texts[i : i + batch_size]
+        response = client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=batch,
+            config=types.EmbedContentConfig(
+                task_type=task_type,
+                output_dimensionality=EMBEDDING_DIM,
+            ),
+        )
+        all_embeddings.extend([e.values for e in response.embeddings])
+
+    return all_embeddings
 
 
 def search_documents(
     db: Session, query_vector: list[float], top_k: int = 3
 ) -> list[tuple[Document, float]]:
-    distance_expr = Document.embedding.cosine_distance(query_vector)
+    """Executes native pgvector similarity search in Supabase PostgreSQL."""
+    sql = text("""
+        SELECT id, title, content, page_number, chunk_index,
+               embedding <-> CAST(:vector AS vector) AS distance
+        FROM documents
+        WHERE embedding IS NOT NULL
+        ORDER BY distance ASC
+        LIMIT :top_k
+    """)
 
-    stmt = (
-        select(Document, distance_expr.label("distance"))
-        .where(Document.embedding.is_not(None))
-        .order_by(distance_expr)
-        .limit(top_k)
-    )
+    vector_str = f"[{','.join(map(str, query_vector))}]"
+    results = db.execute(sql, {"vector": vector_str, "top_k": top_k}).fetchall()
 
-    results = db.execute(stmt).all()
-    return [(row[0], float(row[1])) for row in results]
-
-
-def is_meta_question(question: str) -> bool:
-    q = question.lower()
-    return any(keyword in q for keyword in META_QUESTION_KEYWORDS)
-
-
-def generate_summary_answer(
-    db: Session, question: str, max_chars: int = 12000
-) -> tuple[str, list[Document]]:
-    stmt = (
-        select(Document)
-        .order_by(
-            Document.page_number.is_(None), Document.page_number,
-            Document.chunk_index.is_(None), Document.chunk_index,
-            Document.id,
+    return [
+        (
+            Document(
+                id=row.id,
+                title=row.title,
+                content=row.content,
+                page_number=row.page_number,
+                chunk_index=row.chunk_index,
+            ),
+            float(row.distance),
         )
-    )
-    rows = db.execute(stmt).scalars().all()
-
-    if not rows:
-        return NO_ANSWER_MESSAGE, []
-
-    context_parts = []
-    used_docs = []
-    total_chars = 0
-
-    for doc in rows:
-        piece = doc.content or ""
-        if total_chars + len(piece) > max_chars:
-            break
-        context_parts.append(f"[Source: {doc.file_name or doc.title}] {piece}")
-        total_chars += len(piece)
-        used_docs.append(doc)
-
-    context_text = "\n\n".join(context_parts)
-    prompt = f"""You are a strictly document-grounded assistant. Answer using ONLY the document content given below.
-Do not use outside knowledge. Do not speculate. If the document content does not contain
-enough information to answer, respond with exactly: "{NO_ANSWER_MESSAGE}"
-
-Document content:
-{context_text}
-
-Question: {question}
-
-Answer:"""
-
-    response = client.models.generate_content(
-        model=LLM_MODEL,
-        contents=prompt,
-    )
-    return response.text, used_docs
-
-
-def _build_grounded_prompt(question: str, context_docs: list[Document]) -> str:
-    context_blocks = [
-        f"[Source: {doc.file_name or doc.title} | Page {doc.page_number}] {doc.content}"
-        for doc in context_docs
+        for row in results
     ]
+
+
+def generate_answer(question: str, context_docs: list[Document]) -> str:
+    """Synthesizes a strictly grounded RAG response using Gemini based on retrieved docs."""
+    context_blocks = [doc.content for doc in context_docs if doc.content]
     context_text = "\n\n".join(context_blocks)
 
-    return f"""You are a strictly document-grounded assistant. Follow these rules exactly:
+    prompt = f"""You are a strictly document-grounded assistant. Follow these rules exactly:
 
 1. Answer using ONLY the information in the "Context" section below.
 2. Do not use outside knowledge, training data, or assumptions beyond what is stated in the context.
@@ -157,9 +131,6 @@ Question: {question}
 
 Answer:"""
 
-
-def generate_answer(question: str, context_docs: list[Document]) -> str:
-    prompt = _build_grounded_prompt(question, context_docs)
     response = client.models.generate_content(
         model=LLM_MODEL,
         contents=prompt,
@@ -167,18 +138,61 @@ def generate_answer(question: str, context_docs: list[Document]) -> str:
     return response.text
 
 
-def stream_generate_answer(question: str, context_docs: list[Document]) -> Generator[str, None, None]:
-    prompt = _build_grounded_prompt(question, context_docs)
-    stream = client.models.generate_content_stream(
+def generate_summary_answer(
+    db: Session, question: str, max_chars: int = 12000
+) -> tuple[str, list[Document]]:
+    """Handles broad/meta questions by feeding Gemini the document in reading order."""
+    sql = text("""
+        SELECT id, title, content, page_number, chunk_index
+        FROM documents
+        ORDER BY page_number NULLS LAST, chunk_index NULLS LAST, id
+    """)
+    rows = db.execute(sql).fetchall()
+
+    if not rows:
+        return NO_ANSWER_MESSAGE, []
+
+    context_parts = []
+    used_docs = []
+    total_chars = 0
+
+    for row in rows:
+        piece = row.content or ""
+        if total_chars + len(piece) > max_chars:
+            break
+        context_parts.append(piece)
+        total_chars += len(piece)
+        used_docs.append(
+            Document(
+                id=row.id,
+                title=row.title,
+                content=row.content,
+                page_number=row.page_number,
+                chunk_index=row.chunk_index,
+            )
+        )
+
+    context_text = "\n\n".join(context_parts)
+    prompt = f"""You are a strictly document-grounded assistant. Answer using ONLY the document content given below.
+Do not use outside knowledge. Do not speculate. If the document content does not contain
+enough information to answer, respond with exactly: "{NO_ANSWER_MESSAGE}"
+
+Document content (reading order):
+{context_text}
+
+Question: {question}
+
+Answer:"""
+
+    response = client.models.generate_content(
         model=LLM_MODEL,
         contents=prompt,
     )
-    for chunk in stream:
-        if chunk.text:
-            yield chunk.text
+    return response.text, used_docs
 
 
 def process_pdf(file_contents: bytes) -> list[dict]:
+    """Extracts text from raw PDF bytes, chunks it in batch, generates embeddings, and returns dictionaries."""
     reader = PdfReader(io.BytesIO(file_contents))
     pending_chunks: list[dict] = []
     chunk_global_index = 0
@@ -201,15 +215,11 @@ def process_pdf(file_contents: bytes) -> list[dict]:
     if not pending_chunks:
         return []
 
-    batch_size = 50
+    texts_in_batch = [item["text"] for item in pending_chunks]
+    embeddings = generate_embeddings_batch(texts_in_batch, task_type="RETRIEVAL_DOCUMENT")
+
     chunks_data: list[dict] = []
-
-    for i in range(0, len(pending_chunks), batch_size):
-        batch = pending_chunks[i:i + batch_size]
-        texts_in_batch = [item["text"] for item in batch]
-        embeddings = generate_embeddings_batch(texts_in_batch, task_type="RETRIEVAL_DOCUMENT")
-
-        for item, embedding in zip(batch, embeddings):
-            chunks_data.append({**item, "embedding": embedding})
+    for item, embedding in zip(pending_chunks, embeddings):
+        chunks_data.append({**item, "embedding": embedding})
 
     return chunks_data
