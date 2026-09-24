@@ -9,7 +9,7 @@ from pypdf import PdfReader
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from app.models import Document, ExperimentRun
+from app.models import Document
 from app.utils import chunk_text
 
 # Initialize Gemini Client (reads GEMINI_API_KEY from environment)
