@@ -44,6 +44,19 @@ Base.metadata.create_all(bind=engine)
 def read_root():
     return {"status": "ok", "message": "RAGOps API is running"}
 
+    for i, chunk in enumerate(chunks):
+        embedding = generate_embedding(chunk, task_type="RETRIEVAL_DOCUMENT")
+        db_doc = Document(
+            title=f"{doc.title} (Chunk {i+1})",
+            content=chunk,
+            embedding=embedding,
+            chunk_index=i,
+        )
+        db.add(db_doc)
+        created_docs.append(db_doc)
+
+    if not results:
+        return QueryResponse(answer=NO_ANSWER_MESSAGE, retrieved_docs=[])
 
 @app.post("/upload/")
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
@@ -117,35 +130,14 @@ def query_rag(payload: QueryRequest, db: Session = Depends(get_db)):
     return QueryResponse(
         question=question,
         answer=answer,
-        retrieved_docs=docs,
-        sources=docs,
+        sources=[
+            DocumentChunkOut(
+                id=doc.id,
+                title=doc.title,
+                content=doc.content,
+                chunk_index=getattr(doc, "chunk_index", None),
+                page_number=getattr(doc, "page_number", None),
+            )
+            for doc in relevant_docs
+        ],
     )
-
-
-@app.post("/query/stream/")
-def query_rag_stream(payload: QueryRequest, db: Session = Depends(get_db)):
-    """SSE streaming endpoint for RAG response generation."""
-    question = payload.question.strip() if payload.question else ""
-    if not question:
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
-
-    query_vector = generate_embedding(question, task_type="RETRIEVAL_QUERY")
-    results = search_documents(db, query_vector, top_k=3)
-    docs = [doc for doc, _dist in results] if results else []
-
-    def event_generator() -> Generator[str, None, None]:
-        if not docs:
-            yield f"data: {json.dumps({'type': 'token', 'content': NO_ANSWER_MESSAGE})}\n\n"
-            yield f"data: {json.dumps({'type': 'done'})}\n\n"
-            return
-
-        full_answer = generate_answer(question, docs)
-        words = full_answer.split(" ")
-        for i, chunk in enumerate(words):
-            # Append trailing space except for the final word
-            space = " " if i < len(words) - 1 else ""
-            yield f"data: {json.dumps({'type': 'token', 'content': chunk + space})}\n\n"
-
-        yield f"data: {json.dumps({'type': 'done'})}\n\n"
-
-    return StreamingResponse(event_generator(), media_type="text/event-stream")

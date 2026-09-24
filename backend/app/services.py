@@ -212,6 +212,53 @@ def process_pdf(file_contents: bytes) -> list[dict]:
             })
             chunk_global_index += 1
 
+    return chunks_data
+
+def generate_embeddings_batch(
+    texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", batch_size: int = 100
+) -> list[list[float]]:
+    """Generates 768-dimensional vector embeddings for a list of strings in batches.
+
+    context_text = "\n\n".join(context_parts)
+    prompt = f"""You are a strictly document-grounded assistant. Answer using ONLY the document content given below.
+Do not use outside knowledge. Do not speculate. If the document content does not contain
+enough information to answer, respond with exactly: "{NO_ANSWER_MESSAGE}"
+
+Document content (reading order):
+{context_text}
+
+Question: {question}
+
+Answer:"""
+
+    response = client.models.generate_content(
+        model=LLM_MODEL,
+        contents=prompt,
+    )
+    return response.text, used_docs
+
+
+def process_pdf(file_contents: bytes) -> list[dict]:
+    """Extracts text from raw PDF bytes, chunks it in batch, generates embeddings, and returns dictionaries."""
+    reader = PdfReader(io.BytesIO(file_contents))
+    pending_chunks: list[dict] = []
+    chunk_global_index = 0
+
+    for page_idx, page in enumerate(reader.pages):
+        text_content = page.extract_text()
+        if not text_content or not text_content.strip():
+            continue
+
+        page_chunks = chunk_text(text_content, chunk_size=500, chunk_overlap=50)
+
+        for chunk_str in page_chunks:
+            pending_chunks.append({
+                "text": chunk_str,
+                "page_number": page_idx + 1,
+                "chunk_index": chunk_global_index,
+            })
+            chunk_global_index += 1
+
     if not pending_chunks:
         return []
 
