@@ -11,9 +11,12 @@ class DocumentCreate(BaseModel):
 
 
 class DocumentChunkOut(BaseModel):
+    model_config = {"from_attributes": True}
+
     id: int
     title: str
     content: str
+    file_name: Optional[str] = None
     chunk_index: Optional[int] = None
     page_number: Optional[int] = None
 
@@ -51,6 +54,7 @@ class QueryRequest(BaseModel):
 
 
 class QueryResponse(BaseModel):
-    question: str
+    question: Optional[str] = None
     answer: str
-    sources: list[DocumentChunkOut]
+    sources: list[DocumentChunkOut] = Field(default_factory=list)
+    retrieved_docs: list[DocumentChunkOut] = Field(default_factory=list)
