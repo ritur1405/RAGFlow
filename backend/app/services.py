@@ -216,4 +216,36 @@ Answer:"""
     return response.text
 
 
+def process_pdf(file_contents: bytes) -> list[dict]:
+    """Extracts text from raw PDF bytes, chunks it in batch, generates embeddings, and returns dictionaries."""
+    reader = PdfReader(io.BytesIO(file_contents))
+    pending_chunks: list[dict] = []
+    chunk_global_index = 0
+
+    for page_idx, page in enumerate(reader.pages):
+        text_content = page.extract_text()
+        if not text_content or not text_content.strip():
+            continue
+
+        page_chunks = chunk_text(text_content, chunk_size=500, chunk_overlap=50)
+
+        for chunk_str in page_chunks:
+            pending_chunks.append({
+                "text": chunk_str,
+                "page_number": page_idx + 1,
+                "chunk_index": chunk_global_index,
+            })
+            chunk_global_index += 1
+
+    if not pending_chunks:
+        return []
+
+    texts_in_batch = [item["text"] for item in pending_chunks]
+    embeddings = generate_embeddings_batch(texts_in_batch, task_type="RETRIEVAL_DOCUMENT")
+
+    chunks_data: list[dict] = []
+    for item, embedding in zip(pending_chunks, embeddings):
+        chunks_data.append({**item, "embedding": embedding})
+
+    return chunks_data
 
