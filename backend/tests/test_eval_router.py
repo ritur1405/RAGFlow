@@ -53,12 +53,33 @@ def db_session(tmp_path: Path):
         engine.dispose()
 
 
+# POST /api/eval/run is API-key guarded. Tests configure a known key rather
+# than bypassing the dependency, so the real auth path is exercised.
+EVAL_KEY = "test-eval-key"
+AUTH_HEADER = {"X-API-Key": EVAL_KEY}
+
+
 @pytest.fixture
-def client(db_session):
-    """TestClient wired to the SQLite session instead of Postgres."""
+def configured_key(monkeypatch):
+    monkeypatch.setenv("EVAL_API_KEY", EVAL_KEY)
+    return EVAL_KEY
+
+
+@pytest.fixture
+def client(db_session, configured_key):
+    """TestClient wired to the SQLite session, sending a valid API key by default."""
     app.dependency_overrides[get_db] = lambda: db_session
     # The app's lifespan would run create_all against the real DATABASE_URL,
     # so it is deliberately not started here.
+    with TestClient(app, headers=AUTH_HEADER) as c:
+        yield c
+    app.dependency_overrides.clear()
+
+
+@pytest.fixture
+def anon_client(db_session):
+    """Same wiring, but sends no API key and configures none on the server."""
+    app.dependency_overrides[get_db] = lambda: db_session
     with TestClient(app) as c:
         yield c
     app.dependency_overrides.clear()
@@ -432,6 +453,114 @@ class TestApiContracts:
             "/api/eval/run", json={**_PAYLOAD, "rag_configs": ["magic"]}
         )
         assert resp.status_code == 422
+
+
+class TestEvalRunAuthorization:
+    """POST /api/eval/run must not be callable without authorization.
+
+    Each call spends Gemini credits, so every rejection path is asserted to
+    stop before the pipeline is ever invoked.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _never_runs_the_pipeline(self):
+        """Patched for every test here: an unauthorized call must not reach it."""
+        with patch("app.routers.eval.judge_available", return_value=True), \
+             patch("app.routers.eval.run_pipeline", new_callable=AsyncMock) as pipe, \
+             patch("app.routers.eval.run_generation_eval", new_callable=AsyncMock) as judge:
+            pipe.return_value = _pipeline_result()
+            judge.return_value = _eval_result()
+            self.pipe = pipe
+            yield
+
+    def test_missing_api_key_is_401(self, anon_client, monkeypatch, db_session):
+        monkeypatch.setenv("EVAL_API_KEY", EVAL_KEY)
+
+        resp = anon_client.post("/api/eval/run", json=_PAYLOAD)
+
+        assert resp.status_code == 401
+        assert "X-API-Key" in resp.json()["detail"]
+        self.pipe.assert_not_awaited()
+        assert db_session.query(EvalRun).count() == 0
+
+    def test_wrong_api_key_is_401(self, anon_client, monkeypatch, db_session):
+        monkeypatch.setenv("EVAL_API_KEY", EVAL_KEY)
+
+        resp = anon_client.post(
+            "/api/eval/run", json=_PAYLOAD, headers={"X-API-Key": "not-the-key"}
+        )
+
+        assert resp.status_code == 401
+        self.pipe.assert_not_awaited()
+        assert db_session.query(EvalRun).count() == 0
+
+    def test_empty_api_key_header_is_401(self, anon_client, monkeypatch):
+        monkeypatch.setenv("EVAL_API_KEY", EVAL_KEY)
+
+        resp = anon_client.post(
+            "/api/eval/run", json=_PAYLOAD, headers={"X-API-Key": ""}
+        )
+
+        assert resp.status_code == 401
+        self.pipe.assert_not_awaited()
+
+    def test_endpoint_is_closed_when_server_has_no_key_configured(
+        self, anon_client, monkeypatch, db_session
+    ):
+        """Fail closed: an unconfigured server must not run evaluations at all."""
+        monkeypatch.delenv("EVAL_API_KEY", raising=False)
+
+        resp = anon_client.post(
+            "/api/eval/run", json=_PAYLOAD, headers={"X-API-Key": "anything"}
+        )
+
+        assert resp.status_code == 503
+        assert "EVAL_API_KEY is not configured" in resp.json()["detail"]
+        self.pipe.assert_not_awaited()
+        assert db_session.query(EvalRun).count() == 0
+
+    def test_blank_configured_key_does_not_enable_the_endpoint(
+        self, anon_client, monkeypatch
+    ):
+        """Whitespace is not a key; it must not accidentally open the endpoint."""
+        monkeypatch.setenv("EVAL_API_KEY", "   ")
+
+        resp = anon_client.post(
+            "/api/eval/run", json=_PAYLOAD, headers={"X-API-Key": "   "}
+        )
+
+        assert resp.status_code == 503
+        self.pipe.assert_not_awaited()
+
+    def test_valid_api_key_is_accepted(self, anon_client, monkeypatch):
+        monkeypatch.setenv("EVAL_API_KEY", EVAL_KEY)
+
+        resp = anon_client.post(
+            "/api/eval/run", json=_PAYLOAD, headers={"X-API-Key": EVAL_KEY}
+        )
+
+        assert resp.status_code == 201
+        self.pipe.assert_awaited()
+
+    def test_read_endpoints_remain_open_without_a_key(self, anon_client, monkeypatch):
+        """The dashboard reads results without holding a secret."""
+        monkeypatch.setenv("EVAL_API_KEY", EVAL_KEY)
+
+        assert anon_client.get("/api/eval/compare").status_code == 200
+        assert anon_client.get("/api/eval/results/unknown-id").status_code == 404
+
+    def test_week3_routes_are_not_key_guarded(self, anon_client, monkeypatch):
+        """Guarding must be scoped to evaluation execution, not existing routes."""
+        monkeypatch.setenv("EVAL_API_KEY", EVAL_KEY)
+
+        resp = anon_client.get("/")
+        assert resp.status_code == 200
+
+    def test_openapi_advertises_the_security_scheme_on_run_only(self):
+        spec = app.openapi()
+        run_op = spec["paths"]["/api/eval/run"]["post"]
+        assert "security" in run_op, "POST /api/eval/run should declare a security scheme"
+        assert "security" not in spec["paths"]["/api/eval/compare"]["get"]
 
 
 class TestStartupWiring:

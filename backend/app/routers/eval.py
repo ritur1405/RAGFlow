@@ -35,6 +35,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.auth import require_eval_api_key
 from app.database import SessionLocal, get_db
 from app.eval_generation import (
     ContextChunk,
@@ -231,7 +232,16 @@ def _mark_failed(db: Session, run: EvalRun, exc: Exception) -> None:
 # --------------------------------------------------------------------------- #
 
 
-@router.post("/run", response_model=EvalRunResponse, status_code=201)
+@router.post(
+    "/run",
+    response_model=EvalRunResponse,
+    status_code=201,
+    # Execution is guarded because each call spends Gemini credits: one
+    # generation plus four judge calls per question, per configuration. The
+    # read endpoints below are intentionally left open so the dashboard can
+    # display results without a secret in the browser bundle.
+    dependencies=[Depends(require_eval_api_key)],
+)
 async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db)):
     """Evaluates the benchmark questions against each requested RAG configuration."""
     configs = payload.rag_configs or list(RAGConfig)
