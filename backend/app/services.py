@@ -60,6 +60,12 @@ def generate_embeddings_batch(
                 output_dimensionality=EMBEDDING_DIM,
             ),
         )
+        if not response.embeddings or len(response.embeddings) != len(batch):
+            raise ValueError(
+                f"Failed to generate embeddings for batch. Expected {len(batch)}, "
+                f"got {len(response.embeddings) if response.embeddings else 0}."
+            )
+
         all_embeddings.extend([e.values for e in response.embeddings])
 
     return all_embeddings
