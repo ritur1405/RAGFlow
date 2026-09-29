@@ -6,15 +6,13 @@ from sqlalchemy.orm import Session
 from app.database import Base, engine, get_db
 from app.models import Document
 from app.services import (
-    generate_answer,
     generate_embedding,
-    search_documents,
     process_pdf,
     is_meta_question,
     generate_summary_answer,
-    MAX_RELEVANT_DISTANCE,
-    NO_ANSWER_MESSAGE,
 )
+from app.config import NO_ANSWER_MESSAGE
+from app.rag_pipeline import query_rag
 from app.utils import chunk_text
 from app.schemas import (
     DocumentCreate,
@@ -81,8 +79,7 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
         db.add(db_doc)
         created_docs.append(db_doc)
 
-    if not results:
-        return QueryResponse(answer=NO_ANSWER_MESSAGE, retrieved_docs=[])
+    db.commit()
 
     for d in created_docs:
         db.refresh(d)
@@ -204,16 +201,15 @@ def delete_document(doc_id: int, db: Session = Depends(get_db)):
 
 
 @app.post("/query/", response_model=QueryResponse)
-def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
-    """Performs vector similarity search over chunks and uses Gemini to answer using context.
+def query_endpoint(request: QueryRequest, db: Session = Depends(get_db)):
+    """Performs RAG query: retrieval → context → LLM → answer with citations.
 
     - Broad/summary-style questions bypass vector search and use the whole document.
-    - Specific questions use top-k pgvector search, but fall back to a fixed
-      "cannot find" message if nothing beats MAX_RELEVANT_DISTANCE, rather than
-      forcing Gemini to answer from irrelevant chunks.
+    - Specific questions use the dense RAG pipeline (embedding → pgvector → LLM).
     - request.question is already validated/sanitized by QueryRequest (schemas.py):
       length-bounded and stripped of control characters.
     """
+    # Meta/summary questions still use the full-document path.
     if is_meta_question(request.question):
         answer, relevant_docs = generate_summary_answer(db, request.question)
         return QueryResponse(
@@ -226,37 +222,28 @@ def query_rag(request: QueryRequest, db: Session = Depends(get_db)):
                     content=doc.content,
                     chunk_index=getattr(doc, "chunk_index", None),
                     page_number=getattr(doc, "page_number", None),
+                    file_name=getattr(doc, "file_name", None),
                 )
                 for doc in relevant_docs
             ],
         )
 
-    query_vector = generate_embedding(request.question, task_type="RETRIEVAL_QUERY")
-    scored_docs = search_documents(db, query_vector, top_k=3)
-
-    # Fallback: no chunks at all, or nothing close enough to be trustworthy.
-    if not scored_docs or scored_docs[0][1] > MAX_RELEVANT_DISTANCE:
-        return QueryResponse(
-            question=request.question,
-            answer=NO_ANSWER_MESSAGE,
-            sources=[],
-        )
-
-    relevant_docs = [doc for doc, distance in scored_docs]
-    context_list = [doc.content for doc in relevant_docs]
-    answer = generate_answer(request.question, context_list)
+    # Dense RAG pipeline: query → embedding → retrieval → context → LLM → answer.
+    result = query_rag(db, request.question)
 
     return QueryResponse(
         question=request.question,
-        answer=answer,
+        answer=result.answer,
         sources=[
             DocumentChunkOut(
-                id=doc.id,
-                title=doc.title,
-                content=doc.content,
-                chunk_index=getattr(doc, "chunk_index", None),
-                page_number=getattr(doc, "page_number", None),
+                id=src.chunk_id,
+                title=src.document_name or "Unknown",
+                content=src.text,
+                chunk_index=src.chunk_index,
+                page_number=src.page_number,
+                file_name=src.document_name,
+                score=src.score,
             )
-            for doc in relevant_docs
+            for src in result.sources
         ],
     )
