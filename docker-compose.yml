@@ -1,0 +1,65 @@
+# Repository-root compose file. Build contexts are ./backend and ./frontend,
+# so this must live here rather than inside frontend/.
+#
+#   docker compose up --build
+#
+# GEMINI_API_KEY must be present in the environment or in a .env file beside
+# this one. The backend refuses to start without it, which is deliberate: the
+# evaluation endpoints fail loudly rather than reporting placeholder metrics.
+
+services:
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: ragflow_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgrespassword
+      POSTGRES_DB: ragflow
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # Runs once on an empty data directory and enables the vector extension.
+      # Without this, create_all fails because the Vector(768) column has no
+      # backing type.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ragflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: ragflow_backend
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgrespassword@db:5432/ragflow
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?GEMINI_API_KEY must be set}
+      # Guards POST /api/eval/run, which spends Gemini credits per call.
+      # Required: without it that endpoint stays closed (503).
+      EVAL_API_KEY: ${EVAL_API_KEY:?EVAL_API_KEY must be set to enable evaluation runs}
+      # Optional overrides, defaulted in app/config.py:
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.6-flash}
+      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
+      RAG_TOP_K: ${RAG_TOP_K:-5}
+      RAG_MAX_DISTANCE: ${RAG_MAX_DISTANCE:-0.8}
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: ragflow_frontend
+    ports:
+      - "5173:80"
+    # The bundle calls the API with relative paths; nginx in this image proxies
+    # them to the backend service, so no API host is baked into the build.
+    depends_on:
+      - backend
+
+volumes:
+  pgdata:

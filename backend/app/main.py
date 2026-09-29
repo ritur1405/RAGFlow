@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -5,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from app.database import Base, engine, get_db
 from app.models import Document
+from app.routers import eval as eval_router
 from app.services import (
     generate_embedding,
     process_pdf,
@@ -22,10 +25,23 @@ from app.schemas import (
     QueryResponse,
 )
 
-# Create database tables
-Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="RAGFlow Backend")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Creates tables at startup rather than at import time.
+
+    Importing this module -- which the test suite and any tooling does -- must
+    not require a reachable database. Table creation belongs to starting the
+    app, not to loading it.
+    """
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="RAGFlow Backend", lifespan=lifespan)
+
+# Week 6: generation-evaluation endpoints under /api/eval.
+app.include_router(eval_router.router)
 
 # Enable CORS for frontend integration
 app.add_middleware(
@@ -99,7 +115,11 @@ def create_document(doc: DocumentCreate, db: Session = Depends(get_db)):
     )
 
 
+# /upload/ is an alias kept for the Week 6 frontend, which was written against
+# that shorter path. /documents/upload/ remains the canonical route; both are
+# the same handler, so neither contract can drift from the other.
 @app.post("/documents/upload/", response_model=IngestionResponse)
+@app.post("/upload/", response_model=IngestionResponse, include_in_schema=False)
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Receives a PDF file, validates format and size, extracts chunks, and saves vectors to PostgreSQL."""
 
