@@ -60,6 +60,12 @@ def generate_embeddings_batch(
                 output_dimensionality=EMBEDDING_DIM,
             ),
         )
+        if not response.embeddings or len(response.embeddings) != len(batch):
+            raise ValueError(
+                f"Failed to generate embeddings for batch. Expected {len(batch)}, "
+                f"got {len(response.embeddings) if response.embeddings else 0}."
+            )
+
         all_embeddings.extend([e.values for e in response.embeddings])
 
     return all_embeddings
@@ -210,57 +216,6 @@ Answer:"""
     return response.text
 
 
-feat/ragas-eval-suite
-def process_pdf(file_contents: bytes) -> list[dict]:
-    """Extracts text from raw PDF bytes, chunks it, generates embeddings, and returns structured dictionaries."""
-    reader = PdfReader(io.BytesIO(file_contents))
-    chunks_data = []
-    chunk_global_index = 0
-
-    for page_idx, page in enumerate(reader.pages):
-        text_content = page.extract_text()
-        if not text_content or not text_content.strip():
-            continue
-
-        page_chunks = chunk_text(text_content, chunk_size=500, chunk_overlap=50)
-
-        for chunk_text_str in page_chunks:
-            embedding = generate_embedding(chunk_text_str, task_type="RETRIEVAL_DOCUMENT")
-
-            chunks_data.append({
-                "text": chunk_text_str,
-                "page_number": page_idx + 1,
-                "chunk_index": chunk_global_index,
-                "embedding": embedding,
-            })
-            chunk_global_index += 1
-
-    return chunks_data
-
-def generate_embeddings_batch(
-    texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", batch_size: int = 100
-) -> list[list[float]]:
-    """Generates 768-dimensional vector embeddings for a list of strings in batches.
-
-    context_text = "\n\n".join(context_parts)
-    prompt = f"""You are a strictly document-grounded assistant. Answer using ONLY the document content given below.
-Do not use outside knowledge. Do not speculate. If the document content does not contain
-enough information to answer, respond with exactly: "{NO_ANSWER_MESSAGE}"
-
-Document content (reading order):
-{context_text}
-
-Question: {question}
-
-Answer:"""
-
-    response = client.models.generate_content(
-        model=LLM_MODEL,
-        contents=prompt,
-    )
-    return response.text, used_docs
-
-
 def process_pdf(file_contents: bytes) -> list[dict]:
     """Extracts text from raw PDF bytes, chunks it in batch, generates embeddings, and returns dictionaries."""
     reader = PdfReader(io.BytesIO(file_contents))
@@ -292,5 +247,5 @@ def process_pdf(file_contents: bytes) -> list[dict]:
     for item, embedding in zip(pending_chunks, embeddings):
         chunks_data.append({**item, "embedding": embedding})
 
-    return embeddings
-main
+    return chunks_data
+
