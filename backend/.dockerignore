@@ -1,0 +1,12 @@
+# Docker reads .dockerignore from the build context, which is ./backend.
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+*.db
+*.sqlite3
+tests/
