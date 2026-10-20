@@ -1,22 +1,25 @@
-"""
-eval_generation.py
--------------------
-Member B — Generation Evaluation Layer for RAGOps.
+"""LLM-as-a-judge generation evaluation.
 
-Implements LLM-as-a-judge scoring for four generation-quality metrics:
+Scores a single (query, answer, context) triple on four generation-quality
+metrics:
 
-    1. Faithfulness        - is the answer strictly grounded in the retrieved context?
-    2. Answer Relevance    - does the answer actually address the user's query?
-    3. Context Relevance   - how much of the retrieved context is useful vs. noise?
-    4. Citation Accuracy   - do the cited chunk IDs actually support the claims made?
+    1. Faithfulness       - is the answer strictly grounded in the retrieved context?
+    2. Answer Relevance   - does the answer actually address the user's query?
+    3. Context Relevance  - how much of the retrieved context is useful vs. noise?
+    4. Citation Accuracy  - do the cited chunk IDs actually support the claims made?
 
-All judge calls go through Google's Gemini API using the updated `google-genai` SDK.
-Every score is normalized to the [0.0, 1.0] range and is accompanied by short,
-step-by-step reasoning so results can be audited in the dashboard's detail drawer.
+Every score is normalized to [0.0, 1.0] and carries short step-by-step
+reasoning so a result can be audited in the dashboard rather than taken on
+trust.
+
+Failure policy: this module never invents a score. If the judge cannot run --
+no API key, SDK missing, or the call fails after retries -- it raises. A run
+that could not be judged is recorded as failed, not as a run that happened to
+score well. See JudgeUnavailableError and JudgeCallError.
 
 Environment variables:
-    GEMINI_API_KEY      - required for active LLM judging.
-    GEMINI_JUDGE_MODEL  - optional. Defaults to "gemini-2.5-flash".
+    GEMINI_API_KEY      - required (already required by app.services).
+    GEMINI_JUDGE_MODEL  - optional. Defaults to app.config.LLM_MODEL.
 """
 
 from __future__ import annotations
@@ -30,40 +33,18 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-try:
-    from google import genai
-    from google.genai import types
-    _GENAI_AVAILABLE = True
-except ImportError:
-    _GENAI_AVAILABLE = False
+from google.genai import types
+
+from app.config import LLM_MODEL
+
+# Reuse the single client initialised in services.py rather than creating a
+# second one, matching how app/llm.py sources its client.
+from app.services import client as _client
 
 logger = logging.getLogger("ragops.eval_generation")
 
-# --------------------------------------------------------------------------- #
-# Configuration
-# --------------------------------------------------------------------------- #
-
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GEMINI_JUDGE_MODEL = os.environ.get("GEMINI_JUDGE_MODEL", "gemini-2.5-flash")
-
-_client: Optional[genai.Client] = None
-
-if _GENAI_AVAILABLE and GEMINI_API_KEY:
-    try:
-        _client = genai.Client(api_key=GEMINI_API_KEY)
-    except Exception as exc:
-        logger.warning("Failed to initialize Google GenAI client: %s", exc)
-else:
-    if not GEMINI_API_KEY:
-        logger.warning(
-            "GEMINI_API_KEY is not set. eval_generation.py will use fallback "
-            "scores for evaluation runs until configured."
-        )
-    if not _GENAI_AVAILABLE:
-        logger.warning(
-            "google-genai package is not installed. Run `pip install google-genai` "
-            "to enable live Gemini judge calls."
-        )
+# The judge may deliberately differ from the answer-generation model.
+GEMINI_JUDGE_MODEL = os.environ.get("GEMINI_JUDGE_MODEL", LLM_MODEL)
 
 # Retry policy for transient Gemini errors (rate limits, 5xx, timeouts).
 _MAX_RETRIES = 3
@@ -71,12 +52,35 @@ _RETRY_BACKOFF_SECONDS = 1.5
 
 
 # --------------------------------------------------------------------------- #
+# Errors
+# --------------------------------------------------------------------------- #
+
+
+class JudgeError(RuntimeError):
+    """Base class for judge failures."""
+
+
+class JudgeUnavailableError(JudgeError):
+    """The judge is not configured and therefore cannot score anything."""
+
+
+class JudgeCallError(JudgeError):
+    """The judge was configured but the call failed after every retry."""
+
+
+# --------------------------------------------------------------------------- #
 # Data structures
 # --------------------------------------------------------------------------- #
 
+
 @dataclass
 class ContextChunk:
-    """A single retrieved chunk passed into the generation step."""
+    """A single retrieved chunk passed into the generation step.
+
+    ``chunk_id`` is a string so it compares directly against the citation
+    markers extracted from the generated answer.
+    """
+
     chunk_id: str
     text: str
     metadata: dict[str, Any] = field(default_factory=dict)
@@ -85,17 +89,18 @@ class ContextChunk:
 @dataclass
 class JudgeScore:
     """Normalized output of a single LLM-as-a-judge metric call."""
+
     metric: str
-    score: float                 # normalized 0.0 - 1.0
+    score: float                  # normalized 0.0 - 1.0
     reasoning: str                # short step-by-step justification
     raw_response: Optional[dict] = None
     latency_ms: Optional[float] = None
-    error: Optional[str] = None
 
 
 @dataclass
 class GenerationEvalResult:
     """Aggregate of all four metrics for a single (query, answer, context) triple."""
+
     faithfulness: JudgeScore
     answer_relevance: JudgeScore
     context_relevance: JudgeScore
@@ -120,13 +125,13 @@ def _score_to_dict(s: JudgeScore) -> dict:
         "score": round(s.score, 4) if s.score is not None else None,
         "reasoning": s.reasoning,
         "latency_ms": round(s.latency_ms, 2) if s.latency_ms else None,
-        "error": s.error,
     }
 
 
 # --------------------------------------------------------------------------- #
-# Core Gemini Call Helper
+# Core Gemini call helper
 # --------------------------------------------------------------------------- #
+
 
 def _extract_json(raw_text: str) -> dict:
     """Strips markdown code fences and parses raw JSON response."""
@@ -144,22 +149,9 @@ def _clamp01(value: Any) -> float:
     return max(0.0, min(1.0, v))
 
 
-def _get_fallback_score(metric_name: str) -> JudgeScore:
-    """Generates realistic default scores when LLM calls are unavailable."""
-    defaults = {
-        "faithfulness": (0.88, "Fallback: Answer is consistent with context."),
-        "answer_relevance": (0.90, "Fallback: Answer directly targets the query."),
-        "context_relevance": (0.85, "Fallback: Context contains useful facts."),
-        "citation_accuracy": (0.95, "Fallback: Citations match retrieved context."),
-    }
-    score, reason = defaults.get(metric_name, (0.80, "Fallback score assigned."))
-    return JudgeScore(
-        metric=metric_name,
-        score=score,
-        reasoning=reason,
-        latency_ms=10.0,
-        error="gemini_unconfigured_fallback",
-    )
+def judge_available() -> bool:
+    """True when a judge client is configured. Callers may pre-flight with this."""
+    return _client is not None
 
 
 async def _call_gemini_judge(
@@ -167,12 +159,17 @@ async def _call_gemini_judge(
     user_prompt: str,
     metric_name: str,
 ) -> JudgeScore:
+    """Shared execution path for judge metrics.
+
+    Runs the blocking SDK call in a worker thread and retries transient
+    failures. Raises rather than returning a placeholder score: a metric that
+    could not be measured must not look like a metric that scored well.
     """
-    Shared execution path for judge metrics. Executes the Gemini API call safely
-    in a thread pool, retries on failure, and falls back cleanly without crashing.
-    """
-    if not _client:
-        return _get_fallback_score(metric_name)
+    if _client is None:
+        raise JudgeUnavailableError(
+            "Gemini judge is not configured (no client). Set GEMINI_API_KEY to "
+            "run evaluations."
+        )
 
     start = time.perf_counter()
     last_error: Optional[Exception] = None
@@ -197,7 +194,10 @@ async def _call_gemini_judge(
 
             parsed = _extract_json(response.text)
             score = _clamp01(parsed.get("score"))
-            reasoning = str(parsed.get("reasoning", "")).strip() or "No reasoning provided by judge."
+            reasoning = (
+                str(parsed.get("reasoning", "")).strip()
+                or "No reasoning provided by judge."
+            )
 
             return JudgeScore(
                 metric=metric_name,
@@ -206,7 +206,7 @@ async def _call_gemini_judge(
                 raw_response=parsed,
                 latency_ms=elapsed_ms,
             )
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:  # noqa: BLE001 - retried, then re-raised below
             last_error = exc
             logger.warning(
                 "Judge call failed (metric=%s, attempt=%d/%d): %s",
@@ -215,21 +215,21 @@ async def _call_gemini_judge(
             if attempt < _MAX_RETRIES:
                 await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
 
-    elapsed_ms = (time.perf_counter() - start) * 1000
-    fallback = _get_fallback_score(metric_name)
-    fallback.latency_ms = elapsed_ms
-    fallback.error = str(last_error)
-    fallback.reasoning = f"Judge call failed after {_MAX_RETRIES} attempts ({last_error}). Applied fallback."
-    return fallback
+    logger.exception(
+        "Judge call for metric=%s failed after %d attempts", metric_name, _MAX_RETRIES,
+        exc_info=last_error,
+    )
+    raise JudgeCallError(
+        f"Judge metric '{metric_name}' failed after {_MAX_RETRIES} attempts: {last_error}"
+    ) from last_error
 
 
 def _format_context(context_chunks: list[ContextChunk]) -> str:
     if not context_chunks:
         return "(no context chunks were retrieved)"
-    blocks = []
-    for c in context_chunks:
-        blocks.append(f"[chunk_id: {c.chunk_id}]\n{c.text.strip()}")
-    return "\n\n".join(blocks)
+    return "\n\n".join(
+        f"[chunk_id: {c.chunk_id}]\n{c.text.strip()}" for c in context_chunks
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -270,7 +270,7 @@ Return the JSON object described in your instructions."""
 async def evaluate_faithfulness(
     query: str, answer: str, context_chunks: list[ContextChunk]
 ) -> JudgeScore:
-    """Checks whether `answer` is strictly grounded in `context_chunks` with zero hallucinations."""
+    """Checks whether `answer` is strictly grounded in `context_chunks`."""
     prompt = _FAITHFULNESS_TEMPLATE.format(
         query=query, context=_format_context(context_chunks), answer=answer
     )
@@ -311,9 +311,11 @@ Return the JSON object described in your instructions."""
 
 
 async def evaluate_answer_relevance(query: str, answer: str) -> JudgeScore:
-    """Checks if the answer directly addresses the query (independent of context grounding)."""
+    """Checks if the answer addresses the query, independent of context grounding."""
     prompt = _ANSWER_RELEVANCE_TEMPLATE.format(query=query, answer=answer)
-    return await _call_gemini_judge(_ANSWER_RELEVANCE_SYSTEM, prompt, "answer_relevance")
+    return await _call_gemini_judge(
+        _ANSWER_RELEVANCE_SYSTEM, prompt, "answer_relevance"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -352,11 +354,13 @@ Return the JSON object described in your instructions."""
 async def evaluate_context_relevance(
     query: str, context_chunks: list[ContextChunk]
 ) -> JudgeScore:
-    """Evaluates the quality/noise ratio of the retrieved context for the given query."""
+    """Evaluates the quality/noise ratio of the retrieved context for the query."""
     prompt = _CONTEXT_RELEVANCE_TEMPLATE.format(
         query=query, context=_format_context(context_chunks)
     )
-    return await _call_gemini_judge(_CONTEXT_RELEVANCE_SYSTEM, prompt, "context_relevance")
+    return await _call_gemini_judge(
+        _CONTEXT_RELEVANCE_SYSTEM, prompt, "context_relevance"
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -407,9 +411,9 @@ async def evaluate_citation_accuracy(
     cited_chunk_ids: Optional[list[str]] = None,
     query: str = "",
 ) -> JudgeScore:
-    """Verifies that cited chunk IDs in `answer` actually match/support the context text."""
+    """Verifies that cited chunk IDs in `answer` actually support the context text."""
     if cited_chunk_ids is None:
-        cited_chunk_ids = _extract_citation_ids(answer)
+        cited_chunk_ids = extract_citation_ids(answer)
 
     prompt = _CITATION_ACCURACY_TEMPLATE.format(
         query=query,
@@ -418,9 +422,12 @@ async def evaluate_citation_accuracy(
         cited_ids=", ".join(cited_chunk_ids) if cited_chunk_ids else "(none found)",
     )
 
-    score = await _call_gemini_judge(_CITATION_ACCURACY_SYSTEM, prompt, "citation_accuracy")
+    score = await _call_gemini_judge(
+        _CITATION_ACCURACY_SYSTEM, prompt, "citation_accuracy"
+    )
 
-    # Guardrail check for missing chunk IDs
+    # Deterministic guardrail: a citation pointing at a chunk that was never
+    # retrieved is a hard error regardless of how the judge scored it.
     valid_ids = {c.chunk_id for c in context_chunks}
     fabricated = [cid for cid in cited_chunk_ids if cid not in valid_ids]
     if fabricated:
@@ -433,22 +440,21 @@ async def evaluate_citation_accuracy(
     return score
 
 
-def _extract_citation_ids(answer: str) -> list[str]:
-    """Best-effort extraction of citation markers like [chunk_3], [C12], (chunk-7), etc."""
+def extract_citation_ids(answer: str) -> list[str]:
+    """Best-effort extraction of citation markers like [12], [chunk_3], (chunk-7).
+
+    Returns ids in first-seen order with duplicates removed.
+    """
     pattern = r"\[([A-Za-z0-9_\-]+)\]|\(([A-Za-z0-9_\-]*chunk[A-Za-z0-9_\-]*)\)"
     matches = re.findall(pattern, answer, flags=re.IGNORECASE)
-    ids = []
+
+    seen: set[str] = set()
+    unique_ids: list[str] = []
     for a, b in matches:
         val = a or b
-        if val:
-            ids.append(val)
-    
-    seen = set()
-    unique_ids = []
-    for i in ids:
-        if i not in seen:
-            seen.add(i)
-            unique_ids.append(i)
+        if val and val not in seen:
+            seen.add(val)
+            unique_ids.append(val)
     return unique_ids
 
 
@@ -470,12 +476,19 @@ async def run_generation_eval(
     context_chunks: list[ContextChunk],
     cited_chunk_ids: Optional[list[str]] = None,
 ) -> GenerationEvalResult:
-    """
-    Runs all four LLM-as-a-judge metrics concurrently for a single generation sample.
+    """Runs all four judge metrics concurrently for a single generation sample.
+
+    Raises JudgeUnavailableError / JudgeCallError if any metric cannot be
+    measured. Partial results are not returned.
     """
     start = time.perf_counter()
 
-    faithfulness, answer_relevance, context_relevance, citation_accuracy = await asyncio.gather(
+    (
+        faithfulness,
+        answer_relevance,
+        context_relevance,
+        citation_accuracy,
+    ) = await asyncio.gather(
         evaluate_faithfulness(query, answer, context_chunks),
         evaluate_answer_relevance(query, answer),
         evaluate_context_relevance(query, context_chunks),

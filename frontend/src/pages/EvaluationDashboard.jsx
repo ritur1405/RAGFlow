@@ -25,7 +25,10 @@ import {
  * data-auditing tool for engineers, not a marketing surface.
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+// Relative by default: the vite dev server proxies these paths in development
+// and nginx proxies them in the Docker image, so no absolute host is baked in.
+// Set VITE_API_BASE_URL to point at a backend on another origin.
+const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 const CONFIG_META = {
   baseline: { label: "Baseline RAG", color: "#8FA3C4" },
@@ -71,13 +74,58 @@ function fmtLatency(ms) {
   return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
 }
 
+/** Surfaces the backend's `detail` message so a 502/503 is legible in the UI. */
+async function readError(res) {
+  const body = await res.text().catch(() => "");
+  try {
+    const parsed = JSON.parse(body);
+    if (parsed?.detail) return `${res.status}: ${parsed.detail}`;
+  } catch {
+    /* not JSON; fall through to the raw body */
+  }
+  return `${res.status} ${res.statusText}${body ? `: ${body}` : ""}`;
+}
+
 async function fetchJSON(path) {
   const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`${res.status} ${res.statusText}: ${body}`);
-  }
+  if (!res.ok) throw new Error(await readError(res));
   return res.json();
+}
+
+async function postJSON(path, payload, apiKey) {
+  const headers = { "Content-Type": "application/json" };
+  // Sent per request from a value the operator types in. Deliberately not read
+  // from import.meta.env: a VITE_ variable is compiled into the bundle and
+  // would be served to every visitor.
+  if (apiKey) headers["X-API-Key"] = apiKey;
+
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) throw new Error(await readError(res));
+  return res.json();
+}
+
+/** Remembers the key for this tab only, so it is not persisted to disk. */
+const API_KEY_STORAGE = "ragops.evalApiKey";
+
+function readStoredKey() {
+  try {
+    return sessionStorage.getItem(API_KEY_STORAGE) || "";
+  } catch {
+    return "";
+  }
+}
+
+function storeKey(value) {
+  try {
+    if (value) sessionStorage.setItem(API_KEY_STORAGE, value);
+    else sessionStorage.removeItem(API_KEY_STORAGE);
+  } catch {
+    /* private mode or blocked storage: the key simply is not remembered */
+  }
 }
 
 /* ------------------------------------------------------------------ */
@@ -369,6 +417,190 @@ function DetailDrawer({ runSummary, results, loading, error }) {
 /* Main page                                                           */
 /* ------------------------------------------------------------------ */
 
+/* ------------------------------------------------------------------ */
+/* Run trigger                                                         */
+/* ------------------------------------------------------------------ */
+
+const ALL_CONFIG_KEYS = Object.keys(CONFIG_META);
+
+/** Parses the textarea: one question per line, optional "question | reference answer". */
+function parseQuestions(raw) {
+  return raw
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const [question, ...rest] = line.split("|");
+      const ground_truth = rest.join("|").trim();
+      return { question: question.trim(), ground_truth: ground_truth || null };
+    });
+}
+
+function RunEvaluationPanel({ onCompleted }) {
+  const [open, setOpen] = useState(false);
+  const [datasetName, setDatasetName] = useState("benchmark");
+  const [rawQuestions, setRawQuestions] = useState("");
+  const [selected, setSelected] = useState(ALL_CONFIG_KEYS);
+  const [apiKey, setApiKey] = useState(readStoredKey);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState(null);
+  const [finished, setFinished] = useState(null);
+
+  const questions = useMemo(() => parseQuestions(rawQuestions), [rawQuestions]);
+  const canRun =
+    !running &&
+    questions.length > 0 &&
+    selected.length > 0 &&
+    datasetName.trim() &&
+    apiKey.trim();
+
+  function toggleConfig(key) {
+    setSelected((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key],
+    );
+  }
+
+  async function handleRun() {
+    setRunning(true);
+    setError(null);
+    setFinished(null);
+    try {
+      storeKey(apiKey.trim());
+      const data = await postJSON(
+        "/api/eval/run",
+        {
+          dataset_name: datasetName.trim(),
+          questions,
+          rag_configs: selected,
+        },
+        apiKey.trim(),
+      );
+      setFinished(data.runs || []);
+      onCompleted?.();
+    } catch (err) {
+      // Includes the backend's detail text, so a 503 (judge not configured) or
+      // a 502 (pipeline failed) is readable here instead of silently showing
+      // stale numbers.
+      setError(err.message || "Evaluation failed.");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  return (
+    <div className="mb-8 rounded-md border border-[#2A3B36] bg-[#16211E]">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-5 py-3 text-left"
+      >
+        <span className="text-[15px] text-[#E8EDE9]">Run an evaluation</span>
+        <span className="text-[12px] text-[#5F726B]">{open ? "Hide" : "Show"}</span>
+      </button>
+
+      {open && (
+        <div className="space-y-4 border-t border-[#2A3B36] px-5 py-4">
+          <div>
+            <label className="mb-1 block text-[12px] text-[#8FA39B]">Dataset name</label>
+            <input
+              value={datasetName}
+              onChange={(e) => setDatasetName(e.target.value)}
+              disabled={running}
+              className="w-full rounded border border-[#2A3B36] bg-[#0F1614] px-3 py-2 text-[13px] text-[#E8EDE9] outline-none focus:border-[#6FB1E0] disabled:opacity-50"
+            />
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[12px] text-[#8FA39B]">
+              Questions — one per line, optionally{" "}
+              <span className="font-mono">question | reference answer</span>
+            </label>
+            <textarea
+              value={rawQuestions}
+              onChange={(e) => setRawQuestions(e.target.value)}
+              disabled={running}
+              rows={5}
+              placeholder={"What was Q3 revenue? | It grew 12%\nWho signed the agreement?"}
+              className="w-full rounded border border-[#2A3B36] bg-[#0F1614] px-3 py-2 font-mono text-[12px] text-[#E8EDE9] outline-none focus:border-[#6FB1E0] disabled:opacity-50"
+            />
+            <p className="mt-1 text-[11px] text-[#5F726B]">
+              {questions.length} question{questions.length === 1 ? "" : "s"} parsed
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-1 block text-[12px] text-[#8FA39B]">
+              API key <span className="text-[#5F726B]">(X-API-Key; server-side EVAL_API_KEY)</span>
+            </label>
+            <input
+              type="password"
+              value={apiKey}
+              onChange={(e) => setApiKey(e.target.value)}
+              disabled={running}
+              autoComplete="off"
+              placeholder="required — running an evaluation spends API credits"
+              className="w-full rounded border border-[#2A3B36] bg-[#0F1614] px-3 py-2 font-mono text-[12px] text-[#E8EDE9] outline-none focus:border-[#6FB1E0] disabled:opacity-50"
+            />
+            <p className="mt-1 text-[11px] text-[#5F726B]">
+              Kept for this browser tab only; never written into the build.
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-[12px] text-[#8FA39B]">Configurations</label>
+            <div className="flex flex-wrap gap-2">
+              {ALL_CONFIG_KEYS.map((key) => {
+                const active = selected.includes(key);
+                return (
+                  <button
+                    key={key}
+                    onClick={() => toggleConfig(key)}
+                    disabled={running}
+                    className={`rounded border px-3 py-1.5 text-[12px] transition-colors disabled:opacity-50 ${
+                      active
+                        ? "border-[#6FB1E0] bg-[#16262E] text-[#E8EDE9]"
+                        : "border-[#2A3B36] text-[#8FA39B] hover:text-[#E8EDE9]"
+                    }`}
+                  >
+                    {CONFIG_META[key].label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRun}
+              disabled={!canRun}
+              className="rounded bg-[#6FB1E0] px-4 py-2 text-[13px] font-semibold text-[#0F1614] transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {running ? "Running…" : "Run evaluation"}
+            </button>
+            {running && (
+              <span className="text-[12px] text-[#8FA39B]">
+                Executing real pipelines and judge calls — this can take a while.
+              </span>
+            )}
+          </div>
+
+          {error && (
+            <div className="rounded border border-[#5C2F2F] bg-[#281616] px-4 py-3 text-[12px] text-[#E37B6B]">
+              {error}
+            </div>
+          )}
+
+          {finished && (
+            <div className="rounded border border-[#2F5C48] bg-[#152820] px-4 py-3 text-[12px] text-[#7CE0B8]">
+              Completed {finished.length} run{finished.length === 1 ? "" : "s"}:{" "}
+              {finished.map((r) => `${r.rag_config_label} (${r.status})`).join(", ")}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function EvaluationDashboard() {
   const [configs, setConfigs] = useState([]);
   const [compareLoading, setCompareLoading] = useState(true);
@@ -439,6 +671,8 @@ export default function EvaluationDashboard() {
             {compareError}
           </div>
         )}
+
+        <RunEvaluationPanel onCompleted={loadCompare} />
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

@@ -1,7 +1,6 @@
-import json
-from typing import Generator
+from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -9,19 +8,40 @@ from sqlalchemy.orm import Session
 from app.database import Base, engine, get_db
 from app.models import Document
 from app.routers import eval as eval_router
-from app.schemas import QueryRequest, QueryResponse
 from app.services import (
-    NO_ANSWER_MESSAGE,
-    generate_answer,
     generate_embedding,
-    generate_summary_answer,
-    is_meta_question,
     process_pdf,
-    search_documents,
+    is_meta_question,
+    generate_summary_answer,
+)
+from app.config import NO_ANSWER_MESSAGE
+from app.rag_pipeline import query_rag
+from app.utils import chunk_text
+from app.schemas import (
+    DocumentCreate,
+    DocumentChunkOut,
+    IngestionResponse,
+    QueryRequest,
+    QueryResponse,
 )
 
-# Initialize FastAPI application
-app = FastAPI(title="RAGOps API")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Creates tables at startup rather than at import time.
+
+    Importing this module -- which the test suite and any tooling does -- must
+    not require a reachable database. Table creation belongs to starting the
+    app, not to loading it.
+    """
+    Base.metadata.create_all(bind=engine)
+    yield
+
+
+app = FastAPI(title="RAGFlow Backend", lifespan=lifespan)
+
+# Week 6: generation-evaluation endpoints under /api/eval.
+app.include_router(eval_router.router)
 
 # Configure CORS Middleware
 app.add_middleware(
@@ -55,10 +75,31 @@ def read_root():
         db.add(db_doc)
         created_docs.append(db_doc)
 
-    if not results:
-        return QueryResponse(answer=NO_ANSWER_MESSAGE, retrieved_docs=[])
+    db.commit()
 
-@app.post("/upload/")
+    for d in created_docs:
+        db.refresh(d)
+
+    return IngestionResponse(
+        message=f"Successfully created and stored {len(created_docs)} chunk(s).",
+        chunks=[
+            DocumentChunkOut(
+                id=d.id,
+                title=d.title,
+                content=d.content,
+                chunk_index=d.chunk_index,
+                page_number=getattr(d, "page_number", None),
+            )
+            for d in created_docs
+        ],
+    )
+
+
+# /upload/ is an alias kept for the Week 6 frontend, which was written against
+# that shorter path. /documents/upload/ remains the canonical route; both are
+# the same handler, so neither contract can drift from the other.
+@app.post("/documents/upload/", response_model=IngestionResponse)
+@app.post("/upload/", response_model=IngestionResponse, include_in_schema=False)
 async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)):
     """Uploads a PDF, chunks text, generates embeddings, and saves to database."""
     if not file.filename or not file.filename.lower().endswith(".pdf"):
@@ -99,45 +140,49 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
 
 
 @app.post("/query/", response_model=QueryResponse)
-def query_rag(payload: QueryRequest, db: Session = Depends(get_db)):
-    """Standard (non-streaming) grounded RAG endpoint."""
-    question = payload.question.strip() if payload.question else ""
-    if not question:
-        raise HTTPException(status_code=400, detail="Question cannot be empty.")
+def query_endpoint(request: QueryRequest, db: Session = Depends(get_db)):
+    """Performs RAG query: retrieval → context → LLM → answer with citations.
 
-    if is_meta_question(question):
-        answer, docs = generate_summary_answer(db, question)
+    - Broad/summary-style questions bypass vector search and use the whole document.
+    - Specific questions use the dense RAG pipeline (embedding → pgvector → LLM).
+    - request.question is already validated/sanitized by QueryRequest (schemas.py):
+      length-bounded and stripped of control characters.
+    """
+    # Meta/summary questions still use the full-document path.
+    if is_meta_question(request.question):
+        answer, relevant_docs = generate_summary_answer(db, request.question)
         return QueryResponse(
             question=question,
             answer=answer,
-            retrieved_docs=docs,
-            sources=docs,
+            sources=[
+                DocumentChunkOut(
+                    id=doc.id,
+                    title=doc.title,
+                    content=doc.content,
+                    chunk_index=getattr(doc, "chunk_index", None),
+                    page_number=getattr(doc, "page_number", None),
+                    file_name=getattr(doc, "file_name", None),
+                )
+                for doc in relevant_docs
+            ],
         )
 
-    query_vector = generate_embedding(question, task_type="RETRIEVAL_QUERY")
-    results = search_documents(db, query_vector, top_k=3)
+    # Dense RAG pipeline: query → embedding → retrieval → context → LLM → answer.
+    result = query_rag(db, request.question)
 
-    if not results:
-        return QueryResponse(
-            question=question,
-            answer=NO_ANSWER_MESSAGE,
-            retrieved_docs=[],
-            sources=[],
-        )
-
-    docs = [doc for doc, _dist in results]
-    answer = generate_answer(question, docs)
     return QueryResponse(
-        question=question,
-        answer=answer,
+        question=request.question,
+        answer=result.answer,
         sources=[
             DocumentChunkOut(
-                id=doc.id,
-                title=doc.title,
-                content=doc.content,
-                chunk_index=getattr(doc, "chunk_index", None),
-                page_number=getattr(doc, "page_number", None),
+                id=src.chunk_id,
+                title=src.document_name or "Unknown",
+                content=src.text,
+                chunk_index=src.chunk_index,
+                page_number=src.page_number,
+                file_name=src.document_name,
+                score=src.score,
             )
-            for doc in relevant_docs
+            for src in result.sources
         ],
     )

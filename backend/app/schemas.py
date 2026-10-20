@@ -19,6 +19,8 @@ class DocumentChunkOut(BaseModel):
     file_name: Optional[str] = None
     chunk_index: Optional[int] = None
     page_number: Optional[int] = None
+    file_name: Optional[str] = None
+    score: Optional[float] = None
 
 
 class IngestionResponse(BaseModel):
