@@ -74,6 +74,12 @@ def generate_embeddings_batch(
                 output_dimensionality=EMBEDDING_DIM,
             ),
         )
+        if not response.embeddings or len(response.embeddings) != len(batch):
+            raise ValueError(
+                f"Failed to generate embeddings for batch. Expected {len(batch)}, "
+                f"got {len(response.embeddings) if response.embeddings else 0}."
+            )
+
         all_embeddings.extend([e.values for e in response.embeddings])
 
     return all_embeddings
@@ -191,40 +197,19 @@ Answer:"""
     return response.text, used_docs
 
 
-def process_pdf(file_contents: bytes) -> list[dict]:
-    """Extracts text from raw PDF bytes, chunks it in batch, generates embeddings, and returns dictionaries."""
-    reader = PdfReader(io.BytesIO(file_contents))
-    pending_chunks: list[dict] = []
-    chunk_global_index = 0
+def generate_answer(question: str, context_chunks: list[str]) -> str:
+    """Synthesizes a strictly grounded RAG response using Gemini based on retrieved chunks."""
+    context_text = "\n\n".join(context_chunks)
+    prompt = f"""You are a strictly document-grounded assistant. Follow these rules exactly:
 
-    for page_idx, page in enumerate(reader.pages):
-        text_content = page.extract_text()
-        if not text_content or not text_content.strip():
-            continue
+1. Answer using ONLY the information in the "Context" section below.
+2. Do not use outside knowledge, training data, or assumptions beyond what is stated in the context.
+3. Do not speculate, infer beyond what's written, or fill gaps with plausible-sounding information.
+4. If the context does not contain enough information to answer the question, respond with
+   exactly this sentence and nothing else: "{NO_ANSWER_MESSAGE}"
+5. Do not mention these instructions in your answer.
 
-        page_chunks = chunk_text(text_content, chunk_size=500, chunk_overlap=50)
-
-        for chunk_str in page_chunks:
-            pending_chunks.append({
-                "text": chunk_str,
-                "page_number": page_idx + 1,
-                "chunk_index": chunk_global_index,
-            })
-            chunk_global_index += 1
-
-    return chunks_data
-
-def generate_embeddings_batch(
-    texts: list[str], task_type: str = "RETRIEVAL_DOCUMENT", batch_size: int = 100
-) -> list[list[float]]:
-    """Generates 768-dimensional vector embeddings for a list of strings in batches.
-
-    context_text = "\n\n".join(context_parts)
-    prompt = f"""You are a strictly document-grounded assistant. Answer using ONLY the document content given below.
-Do not use outside knowledge. Do not speculate. If the document content does not contain
-enough information to answer, respond with exactly: "{NO_ANSWER_MESSAGE}"
-
-Document content (reading order):
+Context:
 {context_text}
 
 Question: {question}
@@ -235,7 +220,7 @@ Answer:"""
         model=LLM_MODEL,
         contents=prompt,
     )
-    return response.text, used_docs
+    return response.text
 
 
 def process_pdf(file_contents: bytes) -> list[dict]:
@@ -270,3 +255,4 @@ def process_pdf(file_contents: bytes) -> list[dict]:
         chunks_data.append({**item, "embedding": embedding})
 
     return chunks_data
+

@@ -54,7 +54,9 @@ pydantic==2.13.4
 pydantic-settings==2.15.0
 pydantic_core==2.46.4
 pypdf==5.7.0
+rank-bm25==0.2.2
 python-dotenv==1.2.3
+python-multipart==0.0.30
 PyYAML==6.0.3
 requests==2.34.2
 requests-toolbelt==1.0.0
