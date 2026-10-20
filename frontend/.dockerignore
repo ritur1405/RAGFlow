@@ -1,0 +1,7 @@
+# Build context is ./frontend. node_modules is reinstalled via npm ci in the
+# image, and dist is rebuilt, so neither should be copied in.
+node_modules/
+dist/
+.env
+.env.*
+npm-debug.log*

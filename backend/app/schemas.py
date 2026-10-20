@@ -20,6 +20,8 @@ week-3
 main
     chunk_index: Optional[int] = None
     page_number: Optional[int] = None
+    file_name: Optional[str] = None
+    score: Optional[float] = None
 
 
 class IngestionResponse(BaseModel):

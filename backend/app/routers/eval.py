@@ -1,41 +1,53 @@
-"""
-routers/eval.py
-----------------
-Member B — Evaluation API surface for RAGOps.
+"""Generation-evaluation API.
 
-Endpoints:
-    POST /api/eval/run            Run generation evaluation across selected RAG
-                                  configs against a benchmark dataset, persist results.
-    GET  /api/eval/results/{run_id} Fetch per-question metric scores + reasoning for a run.
-    GET  /api/eval/compare        Side-by-side aggregate metric comparison across all
-                                  4 RAG configurations.
+Flow for a single question, per RAG configuration:
+
+    question
+      -> PIPELINE_REGISTRY[config]        (real retrieval + real generation)
+      -> retrieved context + answer + citations
+      -> run_generation_eval              (real Gemini LLM-as-a-judge)
+      -> four metrics + weighted overall
+      -> EvalResult / EvalRun rows
+      -> dashboard reads /compare and /results/{run_id}
+
+There is no simulator and no placeholder scoring anywhere in this path. If a
+pipeline or the judge fails, the run is marked "failed" with the error message
+recorded and the request returns an error status. The dashboard therefore shows
+either measured numbers or nothing -- never numbers that look measured.
+
+The RAG pipelines are synchronous and need a Session. They are dispatched to a
+worker thread via anyio.to_thread.run_sync, each with a short-lived session of
+its own, so the event loop is never blocked and no Session is shared across
+threads. The request-scoped session is used only for persistence.
 """
 
 from __future__ import annotations
 
-import asyncio
 import enum
-import time
+import logging
 import uuid
 from datetime import datetime
 from typing import Optional
 
+import anyio.to_thread
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from sqlalchemy import (
-    Column,
-    DateTime,
-    Float,
-    ForeignKey,
-    Integer,
-    JSON,
-    String,
-    Text,
-    select,
-)
-from sqlalchemy.orm import Session, relationship
+from sqlalchemy import select
+from sqlalchemy.orm import Session
 
-from app.database import Base, engine, get_db
+from app.auth import require_eval_api_key
+from app.database import SessionLocal, get_db
+from app.eval_generation import (
+    ContextChunk,
+    JudgeError,
+    JudgeUnavailableError,
+    judge_available,
+    run_generation_eval,
+)
+from app.models import EvalResult, EvalRun, utcnow
+from app.rag_pipelines import PIPELINE_REGISTRY, PipelineResult
+
+logger = logging.getLogger("ragops.eval_router")
 
 router = APIRouter(prefix="/api/eval", tags=["evaluation"])
 
@@ -43,6 +55,7 @@ router = APIRouter(prefix="/api/eval", tags=["evaluation"])
 # --------------------------------------------------------------------------- #
 # RAG configuration enum
 # --------------------------------------------------------------------------- #
+
 
 class RAGConfig(str, enum.Enum):
     BASELINE = "baseline"
@@ -58,71 +71,21 @@ RAG_CONFIG_LABELS = {
     RAGConfig.HYBRID_RERANKER: "Hybrid + Reranker",
 }
 
-
-# --------------------------------------------------------------------------- #
-# SQLAlchemy models
-# --------------------------------------------------------------------------- #
-
-class EvalRun(Base):
-    __tablename__ = "eval_runs"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    rag_config = Column(String, nullable=False, index=True)
-    dataset_name = Column(String, nullable=False)
-    num_questions = Column(Integer, nullable=False, default=0)
-    status = Column(String, nullable=False, default="running")  # running | completed | failed
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    completed_at = Column(DateTime, nullable=True)
-
-    avg_faithfulness = Column(Float, nullable=True)
-    avg_answer_relevance = Column(Float, nullable=True)
-    avg_context_relevance = Column(Float, nullable=True)
-    avg_citation_accuracy = Column(Float, nullable=True)
-    avg_overall_score = Column(Float, nullable=True)
-    avg_latency_ms = Column(Float, nullable=True)
-
-    results = relationship(
-        "EvalResult", back_populates="run", cascade="all, delete-orphan"
-    )
-
-
-class EvalResult(Base):
-    __tablename__ = "eval_results"
-
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    run_id = Column(String, ForeignKey("eval_runs.id"), nullable=False, index=True)
-
-    question = Column(Text, nullable=False)
-    ground_truth = Column(Text, nullable=True)
-    generated_answer = Column(Text, nullable=False)
-    context_chunk_ids = Column(JSON, nullable=True)  # list[str]
-    cited_chunk_ids = Column(JSON, nullable=True)    # list[str]
-
-    faithfulness_score = Column(Float, nullable=False)
-    faithfulness_reasoning = Column(Text, nullable=True)
-    answer_relevance_score = Column(Float, nullable=False)
-    answer_relevance_reasoning = Column(Text, nullable=True)
-    context_relevance_score = Column(Float, nullable=False)
-    context_relevance_reasoning = Column(Text, nullable=True)
-    citation_accuracy_score = Column(Float, nullable=False)
-    citation_accuracy_reasoning = Column(Text, nullable=True)
-
-    overall_score = Column(Float, nullable=False)
-    latency_ms = Column(Float, nullable=True)
-
-    run = relationship("EvalRun", back_populates="results")
-
-
-# Create tables if they don't exist
-Base.metadata.create_all(bind=engine, tables=[EvalRun.__table__, EvalResult.__table__])
+# Fail fast at import if the enum and the pipeline registry ever drift apart,
+# rather than discovering it mid-run as a KeyError.
+assert {c.value for c in RAGConfig} == set(PIPELINE_REGISTRY), (
+    "RAGConfig values and PIPELINE_REGISTRY keys must match: "
+    f"{sorted(c.value for c in RAGConfig)} vs {sorted(PIPELINE_REGISTRY)}"
+)
 
 
 # --------------------------------------------------------------------------- #
-# Pydantic schemas
+# Request / response schemas
 # --------------------------------------------------------------------------- #
+
 
 class BenchmarkQuestion(BaseModel):
-    question: str
+    question: str = Field(..., min_length=1)
     ground_truth: Optional[str] = None
 
 
@@ -144,6 +107,7 @@ class EvalRunSummary(BaseModel):
     dataset_name: str
     num_questions: int
     status: str
+    error_message: Optional[str] = None
     avg_faithfulness: Optional[float]
     avg_answer_relevance: Optional[float]
     avg_context_relevance: Optional[float]
@@ -175,7 +139,8 @@ class EvalResultDetail(BaseModel):
     context_relevance: MetricDetail
     citation_accuracy: MetricDetail
     overall_score: float
-    latency_ms: Optional[float]
+    pipeline_latency_ms: Optional[float]
+    judge_latency_ms: Optional[float]
 
 
 class EvalResultsResponse(BaseModel):
@@ -203,64 +168,28 @@ class CompareResponse(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
-# Helpers & Pipeline Interfaces
+# Pipeline execution
 # --------------------------------------------------------------------------- #
 
-class PipelineOutput(BaseModel):
-    answer: str
-    context_chunks: list[dict]
-    cited_chunk_ids: list[str]
-    latency_ms: float
 
-    class Config:
-        arbitrary_types_allowed = True
+def _run_pipeline_sync(config_value: str, question: str) -> PipelineResult:
+    """Runs one RAG configuration in a worker thread with its own Session.
 
-
-async def _run_real_pipeline_if_available(question: str, config: RAGConfig):
+    A SQLAlchemy Session is not thread-safe, so the request-scoped session is
+    deliberately not passed in here. This session is opened and closed entirely
+    inside the worker thread.
+    """
+    pipeline = PIPELINE_REGISTRY[config_value]
+    db = SessionLocal()
     try:
-        from app.rag_pipeline import run_pipeline  # type: ignore
-        result = await run_pipeline(question=question, config=config.value)
-        return PipelineOutput(
-            answer=result["answer"],
-            context_chunks=result["context_chunks"],
-            cited_chunk_ids=result.get("cited_chunk_ids", []),
-            latency_ms=result.get("latency_ms", 0.0),
-        )
-    except Exception:
-        return None
+        return pipeline(db, question)
+    finally:
+        db.close()
 
 
-async def _fallback_pipeline(question: str, config: RAGConfig) -> PipelineOutput:
-    start = time.perf_counter()
-    simulated_latency = {
-        RAGConfig.BASELINE: 0.05,
-        RAGConfig.DENSE: 0.08,
-        RAGConfig.HYBRID: 0.12,
-        RAGConfig.HYBRID_RERANKER: 0.20,
-    }[config]
-    await asyncio.sleep(simulated_latency)
-
-    chunk_1_id = f"{config.value}_chunk_1"
-    chunk_2_id = f"{config.value}_chunk_2"
-    context_chunks = [
-        {"chunk_id": chunk_1_id, "text": f"[{RAG_CONFIG_LABELS[config]}] Relevant context for: {question}"},
-        {"chunk_id": chunk_2_id, "text": f"[{RAG_CONFIG_LABELS[config]}] Additional context for: {question}"},
-    ]
-    answer = f"Based on retrieved context, here is the response to '{question}'. [{chunk_1_id}]"
-    latency_ms = (time.perf_counter() - start) * 1000
-    return PipelineOutput(
-        answer=answer,
-        context_chunks=context_chunks,
-        cited_chunk_ids=[chunk_1_id],
-        latency_ms=latency_ms,
-    )
-
-
-async def get_pipeline_output(question: str, config: RAGConfig) -> PipelineOutput:
-    real = await _run_real_pipeline_if_available(question, config)
-    if real is not None:
-        return real
-    return await _fallback_pipeline(question, config)
+async def run_pipeline(config: RAGConfig, question: str) -> PipelineResult:
+    """Awaitable wrapper: executes the synchronous pipeline off the event loop."""
+    return await anyio.to_thread.run_sync(_run_pipeline_sync, config.value, question)
 
 
 def _summary_from_run(run: EvalRun) -> EvalRunSummary:
@@ -272,6 +201,7 @@ def _summary_from_run(run: EvalRun) -> EvalRunSummary:
         dataset_name=run.dataset_name,
         num_questions=run.num_questions,
         status=run.status,
+        error_message=run.error_message,
         avg_faithfulness=run.avg_faithfulness,
         avg_answer_relevance=run.avg_answer_relevance,
         avg_context_relevance=run.avg_context_relevance,
@@ -283,101 +213,122 @@ def _summary_from_run(run: EvalRun) -> EvalRunSummary:
     )
 
 
+def _mark_failed(db: Session, run: EvalRun, exc: Exception) -> None:
+    """Records the failure on the run so it is visible, then leaves it failed."""
+    run.status = "failed"
+    run.error_message = f"{type(exc).__name__}: {exc}"
+    run.completed_at = utcnow()
+    run.avg_faithfulness = None
+    run.avg_answer_relevance = None
+    run.avg_context_relevance = None
+    run.avg_citation_accuracy = None
+    run.avg_overall_score = None
+    run.avg_latency_ms = None
+    db.commit()
+
+
 # --------------------------------------------------------------------------- #
 # Endpoints
 # --------------------------------------------------------------------------- #
 
-@router.post("/run", response_model=EvalRunResponse, status_code=201)
-async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db)):
-    """Runs generation evaluation across target RAG configurations."""
-    if not payload.questions:
-        raise HTTPException(status_code=400, detail="questions must contain at least one item.")
 
+@router.post(
+    "/run",
+    response_model=EvalRunResponse,
+    status_code=201,
+    # Execution is guarded because each call spends Gemini credits: one
+    # generation plus four judge calls per question, per configuration. The
+    # read endpoints below are intentionally left open so the dashboard can
+    # display results without a secret in the browser bundle.
+    dependencies=[Depends(require_eval_api_key)],
+)
+async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db)):
+    """Evaluates the benchmark questions against each requested RAG configuration."""
     configs = payload.rag_configs or list(RAGConfig)
-    runs: list[EvalRun] = []
+
+    # Pre-flight: refuse up front rather than creating runs that cannot be
+    # scored. Without this the caller would get a half-populated set of runs.
+    if not judge_available():
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Evaluation unavailable: the Gemini judge is not configured. "
+                "Set GEMINI_API_KEY and retry."
+            ),
+        )
+
+    completed: list[EvalRun] = []
 
     for config in configs:
         run = EvalRun(
+            id=str(uuid.uuid4()),
             rag_config=config.value,
             dataset_name=payload.dataset_name,
             num_questions=len(payload.questions),
             status="running",
+            created_at=utcnow(),
         )
         db.add(run)
         db.commit()
-        db.refresh(run)
+
+        totals = {
+            "faithfulness": 0.0,
+            "answer_relevance": 0.0,
+            "context_relevance": 0.0,
+            "citation_accuracy": 0.0,
+            "overall": 0.0,
+            "latency": 0.0,
+        }
 
         try:
-            totals = {
-                "faithfulness": 0.0,
-                "answer_relevance": 0.0,
-                "context_relevance": 0.0,
-                "citation_accuracy": 0.0,
-                "overall": 0.0,
-                "latency": 0.0,
-            }
-
             for q in payload.questions:
-                pipeline_out = await get_pipeline_output(q.question, config)
+                # 1. Real RAG pipeline, off the event loop, own session.
+                pipeline_out = await run_pipeline(config, q.question)
 
-                try:
-                    from app.eval_generation import ContextChunk, run_generation_eval
-                    context_chunks = [
-                        ContextChunk(chunk_id=c["chunk_id"], text=c["text"])
-                        for c in pipeline_out.context_chunks
-                    ]
-                    eval_result = await run_generation_eval(
-                        query=q.question,
-                        answer=pipeline_out.answer,
-                        context_chunks=context_chunks,
-                        cited_chunk_ids=pipeline_out.cited_chunk_ids,
-                    )
-                    f_score, f_reason = eval_result.faithfulness.score, eval_result.faithfulness.reasoning
-                    ar_score, ar_reason = eval_result.answer_relevance.score, eval_result.answer_relevance.reasoning
-                    cr_score, cr_reason = eval_result.context_relevance.score, eval_result.context_relevance.reasoning
-                    ca_score, ca_reason = eval_result.citation_accuracy.score, eval_result.citation_accuracy.reasoning
-                    ov_score = eval_result.overall_score
-                    total_latency = pipeline_out.latency_ms + eval_result.total_latency_ms
-                except Exception as exc:
-                    # Log the actual failure to terminal
-                    print(f"[EVAL ERROR] LLM Judge Failed: {exc}")
-
-                    # Fallback default scores for testing UI rendering
-                    f_score, f_reason = 0.88, "Fallback: Context matches query."
-                    ar_score, ar_reason = 0.90, "Fallback: Relevant response."
-                    cr_score, cr_reason = 0.85, "Fallback: Context contains key facts."
-                    ca_score, ca_reason = 1.00, "Fallback: Citations map accurately."
-                    ov_score = 0.91
-                    total_latency = pipeline_out.latency_ms + 100.0
-
-                row = EvalResult(
-                    run_id=run.id,
-                    question=q.question,
-                    ground_truth=q.ground_truth,
-                    generated_answer=pipeline_out.answer,
-                    context_chunk_ids=[c["chunk_id"] for c in pipeline_out.context_chunks],
+                # 2. Real LLM judge over the actual retrieved context.
+                context_chunks = [
+                    ContextChunk(chunk_id=str(doc.id), text=doc.content)
+                    for doc in pipeline_out.context_docs
+                ]
+                eval_result = await run_generation_eval(
+                    query=q.question,
+                    answer=pipeline_out.answer,
+                    context_chunks=context_chunks,
                     cited_chunk_ids=pipeline_out.cited_chunk_ids,
-                    faithfulness_score=f_score,
-                    faithfulness_reasoning=f_reason,
-                    answer_relevance_score=ar_score,
-                    answer_relevance_reasoning=ar_reason,
-                    context_relevance_score=cr_score,
-                    context_relevance_reasoning=cr_reason,
-                    citation_accuracy_score=ca_score,
-                    citation_accuracy_reasoning=ca_reason,
-                    overall_score=ov_score,
-                    latency_ms=total_latency,
                 )
-                db.add(row)
 
-                totals["faithfulness"] += f_score
-                totals["answer_relevance"] += ar_score
-                totals["context_relevance"] += cr_score
-                totals["citation_accuracy"] += ca_score
-                totals["overall"] += ov_score
-                totals["latency"] += total_latency
+                # 3. Persist the measurement.
+                db.add(
+                    EvalResult(
+                        id=str(uuid.uuid4()),
+                        run_id=run.id,
+                        question=q.question,
+                        ground_truth=q.ground_truth,
+                        generated_answer=pipeline_out.answer,
+                        context_chunk_ids=pipeline_out.retrieved_chunk_ids,
+                        cited_chunk_ids=pipeline_out.cited_chunk_ids,
+                        faithfulness_score=eval_result.faithfulness.score,
+                        faithfulness_reasoning=eval_result.faithfulness.reasoning,
+                        answer_relevance_score=eval_result.answer_relevance.score,
+                        answer_relevance_reasoning=eval_result.answer_relevance.reasoning,
+                        context_relevance_score=eval_result.context_relevance.score,
+                        context_relevance_reasoning=eval_result.context_relevance.reasoning,
+                        citation_accuracy_score=eval_result.citation_accuracy.score,
+                        citation_accuracy_reasoning=eval_result.citation_accuracy.reasoning,
+                        overall_score=eval_result.overall_score,
+                        pipeline_latency_ms=pipeline_out.latency_ms,
+                        judge_latency_ms=eval_result.total_latency_ms,
+                    )
+                )
 
-            n = max(len(payload.questions), 1)
+                totals["faithfulness"] += eval_result.faithfulness.score
+                totals["answer_relevance"] += eval_result.answer_relevance.score
+                totals["context_relevance"] += eval_result.context_relevance.score
+                totals["citation_accuracy"] += eval_result.citation_accuracy.score
+                totals["overall"] += eval_result.overall_score
+                totals["latency"] += pipeline_out.latency_ms
+
+            n = len(payload.questions)
             run.avg_faithfulness = totals["faithfulness"] / n
             run.avg_answer_relevance = totals["answer_relevance"] / n
             run.avg_context_relevance = totals["context_relevance"] / n
@@ -385,18 +336,34 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
             run.avg_overall_score = totals["overall"] / n
             run.avg_latency_ms = totals["latency"] / n
             run.status = "completed"
-            run.completed_at = datetime.utcnow()
+            run.completed_at = utcnow()
             db.commit()
-            db.refresh(run)
-            runs.append(run)
+            completed.append(run)
+
+        except JudgeUnavailableError as exc:
+            logger.exception("Judge unavailable during run %s (%s)", run.id, config.value)
+            _mark_failed(db, run, exc)
+            raise HTTPException(status_code=503, detail=str(exc)) from exc
+
+        except JudgeError as exc:
+            logger.exception("Judge failed during run %s (%s)", run.id, config.value)
+            _mark_failed(db, run, exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"Evaluation failed for config '{config.value}': {exc}",
+            ) from exc
 
         except Exception as exc:
-            run.status = "failed"
-            run.completed_at = datetime.utcnow()
-            db.commit()
-            raise HTTPException(status_code=500, detail=f"Eval run failed: {str(exc)}") from exc
+            # Pipeline failure (retrieval, generation, reranker, database).
+            # Logged with traceback, recorded on the run, surfaced as an error.
+            logger.exception("Pipeline failed during run %s (%s)", run.id, config.value)
+            _mark_failed(db, run, exc)
+            raise HTTPException(
+                status_code=502,
+                detail=f"RAG pipeline failed for config '{config.value}': {exc}",
+            ) from exc
 
-    return EvalRunResponse(runs=[_summary_from_run(r) for r in runs])
+    return EvalRunResponse(runs=[_summary_from_run(r) for r in completed])
 
 
 @router.get("/compare", response_model=CompareResponse)
@@ -406,34 +373,23 @@ def compare_configs(
     run_ids: Optional[str] = Query(None, description="Optional comma-separated run IDs"),
     db: Session = Depends(get_db),
 ):
-    """Side-by-side aggregate metric comparison across configurations."""
+    """Side-by-side aggregate comparison, one row per configuration.
+
+    Only completed runs are considered, so a failed run never contributes
+    numbers to the comparison. A configuration with no completed run reports
+    nulls rather than zeros, letting the dashboard distinguish "not measured"
+    from "measured as zero".
+    """
     explicit_ids = [r.strip() for r in run_ids.split(",")] if run_ids else None
     rows: list[CompareRow] = []
 
     for config in RAGConfig:
-        run: Optional[EvalRun] = None
-
+        stmt = select(EvalRun).where(
+            EvalRun.rag_config == config.value, EvalRun.status == "completed"
+        )
         if explicit_ids:
-            matches = (
-                db.execute(
-                    select(EvalRun).where(
-                        EvalRun.id.in_(explicit_ids), EvalRun.rag_config == config.value
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            run = matches[0] if matches else None
-        else:
-            run = (
-                db.execute(
-                    select(EvalRun)
-                    .where(EvalRun.rag_config == config.value, EvalRun.status == "completed")
-                    .order_by(EvalRun.created_at.desc())
-                )
-                .scalars()
-                .first()
-            )
+            stmt = stmt.where(EvalRun.id.in_(explicit_ids))
+        run = db.execute(stmt.order_by(EvalRun.created_at.desc())).scalars().first()
 
         if run is None:
             rows.append(
@@ -475,7 +431,7 @@ def compare_configs(
 
 @router.get("/results/{run_id}", response_model=EvalResultsResponse)
 def get_results(run_id: str, db: Session = Depends(get_db)):
-    """Retrieves detailed per-question evaluation results for a given run ID."""
+    """Per-question detail for one run, including each metric's reasoning."""
     run = db.get(EvalRun, run_id)
     if run is None:
         raise HTTPException(status_code=404, detail=f"Eval run '{run_id}' not found.")
@@ -494,12 +450,24 @@ def get_results(run_id: str, db: Session = Depends(get_db)):
             generated_answer=row.generated_answer,
             context_chunk_ids=row.context_chunk_ids or [],
             cited_chunk_ids=row.cited_chunk_ids or [],
-            faithfulness=MetricDetail(score=row.faithfulness_score, reasoning=row.faithfulness_reasoning),
-            answer_relevance=MetricDetail(score=row.answer_relevance_score, reasoning=row.answer_relevance_reasoning),
-            context_relevance=MetricDetail(score=row.context_relevance_score, reasoning=row.context_relevance_reasoning),
-            citation_accuracy=MetricDetail(score=row.citation_accuracy_score, reasoning=row.citation_accuracy_reasoning),
+            faithfulness=MetricDetail(
+                score=row.faithfulness_score, reasoning=row.faithfulness_reasoning
+            ),
+            answer_relevance=MetricDetail(
+                score=row.answer_relevance_score,
+                reasoning=row.answer_relevance_reasoning,
+            ),
+            context_relevance=MetricDetail(
+                score=row.context_relevance_score,
+                reasoning=row.context_relevance_reasoning,
+            ),
+            citation_accuracy=MetricDetail(
+                score=row.citation_accuracy_score,
+                reasoning=row.citation_accuracy_reasoning,
+            ),
             overall_score=row.overall_score,
-            latency_ms=row.latency_ms,
+            pipeline_latency_ms=row.pipeline_latency_ms,
+            judge_latency_ms=row.judge_latency_ms,
         )
         for row in rows
     ]
