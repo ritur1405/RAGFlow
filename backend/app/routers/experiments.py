@@ -19,6 +19,10 @@ runs in a worker thread with its own Session, as in the evaluation router.
 A strategy that fails is recorded and returned as failed with its error. It is
 never dropped or replaced, so the comparison cannot show a strategy that did
 not actually run.
+
+POST /benchmark does the same over the whole shared, page-labelled dataset
+and scores every strategy with Recall@K, Precision@K, MRR and nDCG@K, still
+without generation (see app/retrieval_benchmark.py).
 """
 
 from __future__ import annotations
@@ -35,11 +39,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
+from google.genai import errors as genai_errors
 from sqlalchemy.orm import Session
 
+from app.benchmark import load_benchmark
 from app.database import SessionLocal, get_db
-from app.models import ExperimentConfig, ExperimentRun, utcnow
-from app.rag_pipelines import RETRIEVER_REGISTRY, RETRIEVER_SCORE_LABELS, Ranked
+from app.models import Document, ExperimentConfig, ExperimentRun, RetrievalBenchmarkRun, utcnow
+from app.rag_pipelines import FINAL_TOP_K, RETRIEVER_REGISTRY, RETRIEVER_SCORE_LABELS, Ranked
+from app.retrieval_benchmark import aggregate, query_embeddings, run_strategy
 
 logger = logging.getLogger("ragops.experiments_router")
 
@@ -377,3 +384,193 @@ def delete_config(config_id: str, db: Session = Depends(get_db)):
         run.config_id = None
     db.delete(config)
     db.commit()
+
+
+# --------------------------------------------------------------------------- #
+# Retrieval benchmark: every strategy scored on the shared dataset
+# --------------------------------------------------------------------------- #
+
+
+class BenchmarkRequest(BaseModel):
+    strategies: list[Strategy] = Field(
+        default_factory=lambda: list(Strategy),
+        min_length=1,
+        description="Strategies to score. Defaults to all five.",
+    )
+    top_k: int = Field(FINAL_TOP_K, ge=1, le=20, description="K for every metric.")
+
+    @field_validator("strategies")
+    @classmethod
+    def _unique(cls, v):
+        return _dedupe(v)
+
+
+class MetricMeans(BaseModel):
+    n: int
+    precision_at_k: float
+    recall_at_k: float
+    reciprocal_rank: float
+    ndcg_at_k: float
+
+
+class StrategyBenchmark(BaseModel):
+    run_id: str
+    strategy: Strategy
+    label: str
+    status: str
+    error_message: Optional[str] = None
+    k: int
+    num_questions: int
+    avg_precision_at_k: Optional[float] = None
+    avg_recall_at_k: Optional[float] = None
+    avg_mrr: Optional[float] = None
+    avg_ndcg_at_k: Optional[float] = None
+    avg_latency_ms: Optional[float] = None
+    by_type: dict[str, MetricMeans] = Field(default_factory=dict)
+    created_at: datetime
+
+
+class EmbeddingUsage(BaseModel):
+    calls_made: int
+    reused: int
+    avg_latency_ms: Optional[float]
+
+
+class BenchmarkResponse(BaseModel):
+    batch_id: str
+    dataset_name: str
+    k: int
+    num_questions: int
+    embedding: EmbeddingUsage
+    results: list[StrategyBenchmark]
+    # One row per question per strategy, for drill-down.
+    per_question: dict[str, list[dict]] = Field(default_factory=dict)
+
+
+def _benchmark_out(run: RetrievalBenchmarkRun) -> StrategyBenchmark:
+    strategy = Strategy(run.strategy)
+    return StrategyBenchmark(
+        run_id=run.id,
+        strategy=strategy,
+        label=STRATEGY_LABELS[strategy],
+        status=run.status,
+        error_message=run.error_message,
+        k=run.k,
+        num_questions=run.num_questions,
+        avg_precision_at_k=run.avg_precision_at_k,
+        avg_recall_at_k=run.avg_recall_at_k,
+        avg_mrr=run.avg_mrr,
+        avg_ndcg_at_k=run.avg_ndcg_at_k,
+        avg_latency_ms=run.avg_latency_ms,
+        by_type=run.by_type or {},
+        created_at=run.created_at,
+    )
+
+
+@router.post("/benchmark", response_model=BenchmarkResponse)
+async def run_retrieval_benchmark(payload: BenchmarkRequest, db: Session = Depends(get_db)):
+    """Scores each retriever on the shared, page-labelled benchmark.
+
+    Retrieval only: no answer is generated, so this makes no LLM calls, and
+    each question is embedded at most once per server process.
+    """
+    try:
+        dataset = load_benchmark()
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Benchmark dataset not found.")
+
+    questions = [q for q in dataset["questions"] if q.get("relevant_pages")]
+    if not questions:
+        raise HTTPException(status_code=422, detail="The benchmark has no labelled questions.")
+
+    # Without the labelled documents indexed every score would be zero, which
+    # would look like a measurement rather than a missing upload.
+    source_files = {q["source_file"] for q in questions if q.get("source_file")}
+    indexed = set(
+        db.execute(
+            select(Document.file_name).where(Document.file_name.in_(source_files)).distinct()
+        ).scalars()
+    )
+    missing = sorted(source_files - indexed)
+    if missing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Upload the benchmark document(s) first: {', '.join(missing)}.",
+        )
+
+    try:
+        embeddings, embed_stats = await anyio.to_thread.run_sync(
+            query_embeddings, [q["question"] for q in questions]
+        )
+    except genai_errors.APIError as exc:
+        status = 503 if exc.code == 429 else 502
+        raise HTTPException(
+            status_code=status, detail=f"Embedding the benchmark questions failed: {exc.message}"
+        )
+
+    batch_id = str(uuid.uuid4())
+    results: list[StrategyBenchmark] = []
+    per_question: dict[str, list[dict]] = {}
+    for strategy in payload.strategies:
+        run = RetrievalBenchmarkRun(
+            id=str(uuid.uuid4()),
+            batch_id=batch_id,
+            dataset_name=dataset["dataset_name"],
+            strategy=strategy.value,
+            k=payload.top_k,
+            num_questions=len(questions),
+            created_at=utcnow(),
+        )
+        try:
+            rows = await anyio.to_thread.run_sync(
+                run_strategy, strategy.value, questions, payload.top_k, embeddings
+            )
+            summary = aggregate(rows)
+            overall = summary["overall"]
+            run.status = "completed"
+            run.avg_precision_at_k = overall["precision_at_k"]
+            run.avg_recall_at_k = overall["recall_at_k"]
+            run.avg_mrr = overall["reciprocal_rank"]
+            run.avg_ndcg_at_k = overall["ndcg_at_k"]
+            run.avg_latency_ms = summary["avg_latency_ms"]
+            run.by_type = summary["by_type"]
+            run.per_question = [r.to_dict() for r in rows]
+            per_question[strategy.value] = run.per_question
+        except Exception as exc:
+            logger.exception("Retrieval benchmark failed for %s", strategy.value)
+            run.status = "failed"
+            run.error_message = f"{type(exc).__name__}: {exc}"
+        db.add(run)
+        db.commit()
+        results.append(_benchmark_out(run))
+
+    return BenchmarkResponse(
+        batch_id=batch_id,
+        dataset_name=dataset["dataset_name"],
+        k=payload.top_k,
+        num_questions=len(questions),
+        embedding=EmbeddingUsage(
+            calls_made=embed_stats.calls_made,
+            reused=embed_stats.reused,
+            avg_latency_ms=embed_stats.avg_latency_ms,
+        ),
+        results=results,
+        per_question=per_question,
+    )
+
+
+@router.get("/benchmark/runs", response_model=list[StrategyBenchmark])
+def list_benchmark_runs(
+    limit: int = Query(50, ge=1, le=500), db: Session = Depends(get_db)
+):
+    """Most recent retrieval-benchmark results first."""
+    runs = (
+        db.execute(
+            select(RetrievalBenchmarkRun)
+            .order_by(RetrievalBenchmarkRun.created_at.desc())
+            .limit(limit)
+        )
+        .scalars()
+        .all()
+    )
+    return [_benchmark_out(run) for run in runs]
