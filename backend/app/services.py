@@ -11,25 +11,34 @@ from sqlalchemy.orm import Session
 
 from app.config import GEMINI_RETRY_ATTEMPTS
 from app.models import Document
+from app.quota import with_quota_retry
 from app.utils import chunk_text
 
 # Initialize Gemini Client (automatically reads GEMINI_API_KEY from environment).
 #
-# Rate limits (429) and transient server errors are retried with exponential
-# backoff inside the SDK, so every caller of this one client -- ingestion,
-# generation, reranking and the evaluation judge -- rides out a per-minute
-# quota instead of failing. Free-tier keys hit these limits routinely: one
-# PDF upload alone can exceed the 100 embedding requests allowed per minute.
-# Backoff is capped at 60s because per-minute quotas reset within a minute.
+# Every caller -- ingestion, generation and the evaluation judge -- uses this
+# one client, so rate limits are handled here once:
+#   - transient server errors (408/5xx) are retried by the SDK with backoff;
+#   - 429s are retried by app.quota.with_quota_retry, which waits for the
+#     server's suggested delay on a per-minute quota but fails immediately on
+#     a per-day quota, where waiting cannot help.
+# Free-tier keys hit these limits routinely: one PDF upload alone can exceed
+# the 100 embedding requests allowed per minute.
 client = genai.Client(
     http_options=types.HttpOptions(
         retry_options=types.HttpRetryOptions(
             attempts=GEMINI_RETRY_ATTEMPTS,
             initial_delay=2.0,
             max_delay=60.0,
-            http_status_codes=[408, 429, 500, 502, 503, 504],
+            http_status_codes=[408, 500, 502, 503, 504],
         )
     )
+)
+client.models.generate_content = with_quota_retry(
+    client.models.generate_content, GEMINI_RETRY_ATTEMPTS
+)
+client.models.embed_content = with_quota_retry(
+    client.models.embed_content, GEMINI_RETRY_ATTEMPTS
 )
 
 EMBEDDING_MODEL = "gemini-embedding-001"

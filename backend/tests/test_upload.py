@@ -62,8 +62,11 @@ def test_unreadable_pdf_is_still_422(client):
     assert "corrupted or unreadable" in resp.json()["detail"]
 
 
-def test_gemini_client_retries_rate_limits_with_backoff():
+def test_gemini_client_retries_transient_errors_and_rate_limits():
     retry = services.client._api_client._http_options.retry_options
     assert retry.attempts >= 2
-    assert 429 in retry.http_status_codes
-    assert retry.max_delay == 60.0
+    assert 503 in retry.http_status_codes
+    # 429s are handled by app.quota so daily quotas are not retried.
+    assert 429 not in retry.http_status_codes
+    assert services.client.models.generate_content.__wrapped__
+    assert services.client.models.embed_content.__wrapped__
