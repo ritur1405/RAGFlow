@@ -79,3 +79,23 @@ def test_delete_unknown_file_is_404(client, library):
 def test_chunk_listing_includes_file_name(client, library):
     chunks = client.get("/documents/").json()
     assert {c["file_name"] for c in chunks} == {"paper.pdf", "notes.pdf", None}
+
+
+def test_upload_response_reports_each_chunk_file_name(client, db_session):
+    from unittest.mock import patch
+
+    chunks = [
+        {"text": "first", "content": "first", "page_number": 1, "chunk_index": 0, "embedding": [0.1] * 768},
+        {"text": "second", "content": "second", "page_number": 2, "chunk_index": 1, "embedding": [0.2] * 768},
+    ]
+    with patch("app.main.process_pdf", return_value=chunks):
+        resp = client.post(
+            "/documents/upload/",
+            files={"file": ("paper.pdf", b"%PDF-1.5", "application/pdf")},
+        )
+
+    assert resp.status_code == 200
+    body = resp.json()["chunks"]
+    assert [(c["file_name"], c["page_number"]) for c in body] == [("paper.pdf", 1), ("paper.pdf", 2)]
+    # And the stored rows agree with what the response reported.
+    assert {d.file_name for d in db_session.query(Document).all()} == {"paper.pdf"}
