@@ -754,5 +754,5 @@ class TestBenchmarkEndpoint:
         assert data["source"]["file_name"] == request.questions[0].source_file
 
     def test_missing_file_is_404(self, anon_client, tmp_path):
-        with patch("app.routers.eval.BENCHMARK_PATH", tmp_path / "nope.json"):
+        with patch("app.benchmark.BENCHMARK_PATH", tmp_path / "nope.json"):
             assert anon_client.get("/api/eval/benchmark").status_code == 404

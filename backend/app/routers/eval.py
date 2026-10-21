@@ -26,11 +26,9 @@ threads. The request-scoped session is used only for persistence.
 from __future__ import annotations
 
 import enum
-import json
 import logging
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Annotated, Optional
 
 import anyio.to_thread
@@ -40,6 +38,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.auth import require_eval_api_key
+from app.benchmark import load_benchmark
 from app.database import SessionLocal, get_db
 from app.eval_generation import (
     ContextChunk,
@@ -55,9 +54,6 @@ from app.rag_pipelines import FINAL_TOP_K, PIPELINE_REGISTRY, PipelineResult
 logger = logging.getLogger("ragops.eval_router")
 
 router = APIRouter(prefix="/api/eval", tags=["evaluation"])
-
-# The shared, page-labelled benchmark every configuration is compared on.
-BENCHMARK_PATH = Path(__file__).resolve().parents[2] / "benchmarks" / "ragops_benchmark.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -456,7 +452,7 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
 def get_benchmark():
     """The shared benchmark dataset, so the dashboard can run it as-is."""
     try:
-        return json.loads(BENCHMARK_PATH.read_text(encoding="utf-8"))
+        return load_benchmark()
     except FileNotFoundError:
         raise HTTPException(status_code=404, detail="Benchmark dataset not found.")
 
