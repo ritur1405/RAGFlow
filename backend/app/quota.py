@@ -73,3 +73,27 @@ def with_quota_retry(fn: Callable[..., Any], attempts: int) -> Callable[..., Any
         raise AssertionError("unreachable")  # the loop always returns or raises
 
     return call
+
+
+def find_rate_limit(exc: BaseException) -> Optional[genai_errors.APIError]:
+    """The 429 behind an exception, following wrapped causes, or None."""
+    seen = set()
+    current: Optional[BaseException] = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, genai_errors.APIError) and current.code == 429:
+            return current
+        current = current.__cause__ or current.__context__
+    return None
+
+
+def rate_limit_message(exc: genai_errors.APIError) -> str:
+    """A user-facing explanation of a 429, naming the model when the error does."""
+    match = re.search(r"model: ([\w.\-]+)", exc.message or "")
+    model = f" for {match.group(1)}" if match else ""
+    if is_daily_quota(exc):
+        return (
+            f"The Gemini free-tier daily request limit{model} has been reached. "
+            "It resets daily; try again tomorrow."
+        )
+    return f"The Gemini free-tier rate limit{model} was reached. Try again in a minute."
