@@ -20,6 +20,14 @@ class DocumentChunkOut(BaseModel):
     score: Optional[float] = None
 
 
+class DocumentFileOut(BaseModel):
+    file_name: str
+    is_file: bool  # False for text ingested via POST /documents/ (grouped by title)
+    chunks: int
+    pages: int
+    first_chunk_id: int
+
+
 class IngestionResponse(BaseModel):
     message: str
     chunks: list[DocumentChunkOut]
