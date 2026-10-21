@@ -3,6 +3,7 @@ from contextlib import asynccontextmanager
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from google.genai import errors as genai_errors
 from sqlalchemy.orm import Session
 
 from app.database import Base, add_missing_columns, engine, get_db
@@ -149,6 +150,21 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
     # 4. Extract Chunks via PDF Processor
     try:
         parsed_chunks = process_pdf(contents)
+    except genai_errors.APIError as e:
+        # The PDF was fine; embedding it failed upstream. Reporting that as a
+        # corrupt file would send the user looking for the wrong problem.
+        if e.code == 429:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "The embedding service's rate limit or quota was exhausted while "
+                    f"processing this PDF. Try again later. ({e.message})"
+                ),
+            )
+        raise HTTPException(
+            status_code=502,
+            detail=f"The embedding service failed while processing this PDF: {e.message}",
+        )
     except Exception as e:
         raise HTTPException(
             status_code=422,

@@ -9,11 +9,28 @@ from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from app.config import GEMINI_RETRY_ATTEMPTS
 from app.models import Document
 from app.utils import chunk_text
 
-# Initialize Gemini Client (automatically reads GEMINI_API_KEY from environment)
-client = genai.Client()
+# Initialize Gemini Client (automatically reads GEMINI_API_KEY from environment).
+#
+# Rate limits (429) and transient server errors are retried with exponential
+# backoff inside the SDK, so every caller of this one client -- ingestion,
+# generation, reranking and the evaluation judge -- rides out a per-minute
+# quota instead of failing. Free-tier keys hit these limits routinely: one
+# PDF upload alone can exceed the 100 embedding requests allowed per minute.
+# Backoff is capped at 60s because per-minute quotas reset within a minute.
+client = genai.Client(
+    http_options=types.HttpOptions(
+        retry_options=types.HttpRetryOptions(
+            attempts=GEMINI_RETRY_ATTEMPTS,
+            initial_delay=2.0,
+            max_delay=60.0,
+            http_status_codes=[408, 429, 500, 502, 503, 504],
+        )
+    )
+)
 
 EMBEDDING_MODEL = "gemini-embedding-001"
 LLM_MODEL = "gemini-3.6-flash"  # gemini-2.5-flash is no longer available to new users
