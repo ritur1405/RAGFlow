@@ -73,6 +73,8 @@ server.
    Hybrid + Cross-Encoder and Baseline side by side. Retrieval only, so it is
    fast and free of generation cost. Shows rankings, scores, which chunks the
    retrievers agree on, and latency. Runs and named configurations are stored.
+   **Benchmark every retriever** scores all five strategies on the labelled
+   dataset with Recall@K, Precision@K, MRR and nDCG@K.
 4. **Evaluation** (`/evaluation`): "Load shared benchmark" and run it (needs the
    `EVAL_API_KEY`) to score all four configurations, or browse earlier runs
    question by question, with the judge's reasoning for every score.
@@ -87,11 +89,31 @@ python scripts/run_benchmark.py            # --limit 2 for a quick smoke test
 
 ## Benchmark results
 
+### Retrieval (all five strategies, 22 labelled questions, K=3)
+
+| Strategy | Recall@3 | Precision@3 | MRR | nDCG@3 | Retrieval latency |
+|---|---:|---:|---:|---:|---:|
+| Dense | **0.864** | **0.606** | **0.894** | **0.655** | 2 ms |
+| BM25 | 0.508 | 0.303 | 0.508 | 0.328 | 13 ms |
+| Hybrid (RRF) | 0.848 | **0.606** | 0.803 | 0.625 | 15 ms |
+| Hybrid + Cross-Encoder | **0.864** | **0.606** | 0.879 | 0.644 | 294 ms |
+
+Dense is the strongest single retriever on this corpus. BM25 is held back by
+its naive tokeniser. Hybrid gains coverage (the best first-stage Recall@5, at
+0.924) but loses rank quality to BM25's noise, and the cross-encoder recovers
+most of that. The query embedding (~420 ms) is excluded from latency. The full
+tables (K=3 and K=5, plus results by question type), the findings and the
+methodology are in [docs/benchmarks/retrieval.md](docs/benchmarks/retrieval.md).
+The benchmark makes no generation calls and costs nothing on the free tier.
+
+### Generation (LLM-judged)
+
 The full results (tables per configuration and per question type, plus
 charts) are written to [docs/benchmarks/results.md](docs/benchmarks/results.md)
-by `scripts/run_benchmark.py`. The full run makes about 440 Gemini calls, so it
-needs a key with a paid-tier quota: the free tier allows only 20 generation
-requests per day for `gemini-3.6-flash`.
+by `scripts/run_benchmark.py`. As currently designed, a full run makes about
+440 Gemini calls, while the free tier allows 20 generation requests per day for
+`gemini-3.6-flash`. The project stays on the free tier, so these results will
+be added once the run fits within that limit.
 
 How to read the numbers, and the analysis, are in [docs/REPORT.md](docs/REPORT.md#3-results).
 
@@ -204,6 +226,8 @@ Full interactive docs at `/docs`. Summary:
 | POST | `/api/experiments/compare` | Rank one query with several retrievers |
 | GET | `/api/experiments/runs` | Experiment history |
 | GET/POST/DELETE | `/api/experiments/configs` | Saved experiment configurations |
+| POST | `/api/experiments/benchmark` | Score every retriever on the shared dataset (no generation) |
+| GET | `/api/experiments/benchmark/runs` | Retrieval benchmark history |
 | POST | `/api/eval/run` | Run the benchmark (requires `X-API-Key`) |
 | GET | `/api/eval/compare` | Latest completed run per configuration |
 | GET | `/api/eval/results/{run_id}` | Per-question scores and judge reasoning |
