@@ -83,7 +83,7 @@ def search_documents(
     vector_str = f"[{','.join(map(str, query_vector))}]"
 
     sql = text("""
-        SELECT id, title, content, page_number, chunk_index,
+        SELECT id, file_name, title, content, page_number, chunk_index,
                embedding <-> CAST(:vector AS vector) AS distance
         FROM documents
         WHERE embedding IS NOT NULL
@@ -98,6 +98,7 @@ def search_documents(
         (
             Document(
                 id=row.id,
+                file_name=row.file_name,
                 title=row.title,
                 content=row.content,
                 page_number=row.page_number,
