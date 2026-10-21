@@ -214,6 +214,7 @@ async def upload_pdf(file: UploadFile = File(...), db: Session = Depends(get_db)
                 content=d.content,
                 chunk_index=d.chunk_index,
                 page_number=d.page_number,
+                file_name=d.file_name,
             )
             for d in created_docs
         ],
