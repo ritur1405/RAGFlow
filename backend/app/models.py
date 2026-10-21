@@ -170,3 +170,36 @@ class ExperimentRun(Base):
     created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
 
     config = relationship("ExperimentConfig", back_populates="runs")
+
+
+class RetrievalBenchmarkRun(Base):
+    """One retrieval strategy scored over the shared benchmark (no generation).
+
+    Strategies run together share a batch_id, so a comparison can be shown as
+    it was measured. Metrics are at K over the labelled questions; latency is
+    retrieval only, excluding the query embedding (reported per batch).
+    """
+
+    __tablename__ = "retrieval_benchmark_runs"
+
+    id = Column(String, primary_key=True)
+    batch_id = Column(String, nullable=False, index=True)
+    dataset_name = Column(String, nullable=False)
+    strategy = Column(String, nullable=False, index=True)
+    k = Column(Integer, nullable=False)
+    num_questions = Column(Integer, nullable=False)
+
+    # completed | failed
+    status = Column(String, nullable=False)
+    error_message = Column(Text, nullable=True)
+
+    avg_precision_at_k = Column(Float, nullable=True)
+    avg_recall_at_k = Column(Float, nullable=True)
+    avg_mrr = Column(Float, nullable=True)
+    avg_ndcg_at_k = Column(Float, nullable=True)
+    avg_latency_ms = Column(Float, nullable=True)
+
+    by_type = Column(JSON, nullable=True)       # {type: {n, metric: mean}}
+    per_question = Column(JSON, nullable=True)  # [{question, type, pages, metrics}]
+
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)

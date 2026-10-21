@@ -32,7 +32,9 @@ from __future__ import annotations
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List, Tuple
+from contextlib import contextmanager
+from contextvars import ContextVar
+from typing import Callable, Dict, Iterator, List, Optional, Tuple
 
 from rank_bm25 import BM25Okapi
 from sqlalchemy import select
@@ -132,9 +134,31 @@ def _docs(ranked: Ranked) -> List[Document]:
     return [doc for doc, _score in ranked]
 
 
+# Query embeddings supplied by the caller, keyed by question text. The
+# retrieval benchmark embeds each benchmark question once and reuses it across
+# every strategy and run, instead of paying one embedding call per strategy.
+# Unset everywhere else, so Ask and the Experiments page always embed afresh.
+_precomputed_query_embeddings: ContextVar[Optional[Dict[str, List[float]]]] = ContextVar(
+    "precomputed_query_embeddings", default=None
+)
+
+
+@contextmanager
+def precomputed_query_embeddings(embeddings: Dict[str, List[float]]) -> Iterator[None]:
+    """Within this block, dense retrieval uses these vectors for matching questions."""
+    token = _precomputed_query_embeddings.set(embeddings)
+    try:
+        yield
+    finally:
+        _precomputed_query_embeddings.reset(token)
+
+
 def _dense_candidates(db: Session, question: str, top_k: int):
     """Embeds the question and returns (Document, distance) pairs from pgvector."""
-    query_vector = generate_embedding(question, task_type=EMBED_TASK_QUERY)
+    supplied = _precomputed_query_embeddings.get()
+    query_vector = supplied.get(question) if supplied else None
+    if query_vector is None:
+        query_vector = generate_embedding(question, task_type=EMBED_TASK_QUERY)
     return search_documents(db, query_vector, top_k=top_k)
 
 

@@ -4,6 +4,7 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
+  Legend,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -22,6 +23,8 @@ import { deleteJSON, fetchJSON, fmtLatency, postJSON } from "../lib/api.js";
  *   GET    /api/experiments/configs         -> saved configurations
  *   POST   /api/experiments/configs         -> save a configuration
  *   DELETE /api/experiments/configs/:id
+ *   POST   /api/experiments/benchmark       -> every strategy scored on the shared dataset
+ *   GET    /api/experiments/benchmark/runs  -> earlier benchmark results
  *
  * Retrieval only: nothing is generated or judged here, so a comparison is
  * fast and cheap. Chunks retrieved by more than one strategy are marked, and
@@ -324,6 +327,212 @@ function OverlapMatrix({ results }) {
   );
 }
 
+/* ------------------------------------------------------------------ */
+/* Benchmark on the shared dataset                                    */
+/* ------------------------------------------------------------------ */
+
+const BENCH_METRICS = [
+  { key: "avg_recall_at_k", label: "Recall@K" },
+  { key: "avg_precision_at_k", label: "Precision@K" },
+  { key: "avg_mrr", label: "MRR" },
+  { key: "avg_ndcg_at_k", label: "nDCG@K" },
+];
+
+function fmtMetric(v) {
+  return v === null || v === undefined ? "—" : v.toFixed(3);
+}
+
+/** The best value per metric across completed strategies, so it can be highlighted. */
+function bestPerMetric(results) {
+  const best = {};
+  for (const { key } of BENCH_METRICS) {
+    const values = results.filter((r) => r.status === "completed").map((r) => r[key]);
+    best[key] = values.length ? Math.max(...values) : null;
+  }
+  return best;
+}
+
+function BenchmarkPanel() {
+  const [topK, setTopK] = useState(3);
+  const [running, setRunning] = useState(false);
+  const [error, setError] = useState(null);
+  const [result, setResult] = useState(null);
+
+  const run = async () => {
+    setRunning(true);
+    setError(null);
+    try {
+      setResult(await postJSON("/api/experiments/benchmark", { top_k: topK }));
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  const results = result?.results || [];
+  const best = bestPerMetric(results);
+  const types = [...new Set(results.flatMap((r) => Object.keys(r.by_type || {})))];
+  const chartData = BENCH_METRICS.map((m) => ({
+    metric: m.label,
+    ...Object.fromEntries(results.filter((r) => r.status === "completed").map((r) => [r.strategy, r[m.key]])),
+  }));
+
+  return (
+    <section className={`${panel} mb-8 p-5`}>
+      <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+        <div className="max-w-2xl">
+          <h2 className="text-[15px] text-[#E8EDE9]">Benchmark every retriever on the shared dataset</h2>
+          <p className="mt-1 text-[12px] text-[#8FA39B]">
+            Scores all five strategies on the page-labelled benchmark questions with Recall@K, Precision@K, MRR
+            and nDCG@K. Retrieval only, so no answers are generated. Each question is embedded once per server
+            process and reused for every strategy.
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center gap-2 text-[12px] text-[#8FA39B]">
+            K
+            <input
+              type="number"
+              min={1}
+              max={20}
+              className={`${input} w-16`}
+              value={Number.isNaN(topK) ? "" : topK}
+              onChange={(e) => setTopK(parseInt(e.target.value, 10))}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={run}
+            disabled={running || !(topK >= 1 && topK <= 20)}
+            className="rounded bg-[#5FE0B8] px-5 py-2 text-[13px] font-semibold text-[#0F1614] hover:bg-[#7CE0B8] disabled:opacity-40"
+          >
+            {running ? "Scoring…" : "Run benchmark"}
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div className="mb-4 rounded border border-[#5C2F2F] bg-[#281616] px-4 py-3 text-[12px] text-[#E37B6B]">{error}</div>
+      )}
+
+      {result && (
+        <div className="space-y-4">
+          <p className="text-[11px] text-[#5F726B]">
+            {result.dataset_name} · {result.num_questions} labelled questions · K={result.k} · query embeddings:{" "}
+            {result.embedding.calls_made} new, {result.embedding.reused} reused
+            {result.embedding.avg_latency_ms != null && ` (≈${fmtLatency(result.embedding.avg_latency_ms)} each, excluded from latency below)`}
+          </p>
+
+          <div className="overflow-x-auto rounded border border-[#2A3B36]">
+            <table className="w-full text-[12px]">
+              <thead className="text-left text-[#5F726B]">
+                <tr>
+                  <th className="px-3 py-2 font-normal">Strategy</th>
+                  {BENCH_METRICS.map((m) => (
+                    <th key={m.key} className="px-3 py-2 text-right font-normal">
+                      {m.label.replace("K", String(result.k))}
+                    </th>
+                  ))}
+                  <th className="px-3 py-2 text-right font-normal">Retrieval latency</th>
+                </tr>
+              </thead>
+              <tbody>
+                {results.map((r) => (
+                  <tr key={r.strategy} className="border-t border-[#22302C]">
+                    <td className="px-3 py-2" style={{ color: STRATEGY_META[r.strategy]?.color }}>
+                      {r.label}
+                    </td>
+                    {r.status === "failed" ? (
+                      <td colSpan={BENCH_METRICS.length + 1} className="px-3 py-2 text-[#E37B6B]">
+                        failed: {r.error_message}
+                      </td>
+                    ) : (
+                      <>
+                        {BENCH_METRICS.map((m) => (
+                          <td
+                            key={m.key}
+                            className={`px-3 py-2 text-right font-mono ${
+                              r[m.key] === best[m.key] ? "font-semibold text-[#7CE0B8]" : "text-[#C9D4CF]"
+                            }`}
+                          >
+                            {fmtMetric(r[m.key])}
+                          </td>
+                        ))}
+                        <td className="px-3 py-2 text-right font-mono text-[#C9D4CF]">{fmtLatency(r.avg_latency_ms)}</td>
+                      </>
+                    )}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div className="rounded border border-[#2A3B36] p-3">
+              <p className="mb-2 text-[12px] text-[#8FA39B]">Metrics by strategy</p>
+              <div className="h-60">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={chartData} margin={{ left: -16, right: 8 }}>
+                    <CartesianGrid stroke="#22302C" vertical={false} />
+                    <XAxis dataKey="metric" stroke="#8FA39B" fontSize={11} />
+                    <YAxis domain={[0, 1]} stroke="#5F726B" fontSize={11} />
+                    <Tooltip
+                      cursor={{ fill: "#22302C" }}
+                      contentStyle={{ background: "#16211E", border: "1px solid #2A3B36", fontSize: 12 }}
+                      formatter={(v, name) => [fmtMetric(v), STRATEGY_META[name]?.label || name]}
+                    />
+                    <Legend formatter={(v) => <span style={{ fontSize: 11, color: "#C9D4CF" }}>{STRATEGY_META[v]?.label || v}</span>} />
+                    {results
+                      .filter((r) => r.status === "completed")
+                      .map((r) => (
+                        <Bar key={r.strategy} dataKey={r.strategy} fill={STRATEGY_META[r.strategy]?.color} maxBarSize={18} />
+                      ))}
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto rounded border border-[#2A3B36] p-3">
+              <p className="mb-2 text-[12px] text-[#8FA39B]">nDCG@{result.k} by question type</p>
+              <table className="text-[12px]">
+                <thead>
+                  <tr className="text-left text-[#5F726B]">
+                    <th className="py-1 pr-4 font-normal">Type</th>
+                    {results.map((r) => (
+                      <th key={r.strategy} className="px-2 py-1 text-right font-normal" style={{ color: STRATEGY_META[r.strategy]?.color }}>
+                        {r.label}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {types.map((t) => (
+                    <tr key={t} className="border-t border-[#22302C]">
+                      <td className="py-1 pr-4 text-[#C9D4CF]">
+                        {t} <span className="text-[#5F726B]">({results.find((r) => r.by_type?.[t])?.by_type[t].n})</span>
+                      </td>
+                      {results.map((r) => (
+                        <td key={r.strategy} className="px-2 py-1 text-right font-mono text-[#C9D4CF]">
+                          {fmtMetric(r.by_type?.[t]?.ndcg_at_k)}
+                        </td>
+                      ))}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="mt-2 text-[11px] text-[#5F726B]">
+                Keyword questions hinge on exact names and numbers; paraphrased ones share little vocabulary with
+                the text.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function RunHistory({ runs, loading, onRefresh, onRerun }) {
   return (
     <div className={`${panel} overflow-hidden`}>
@@ -571,6 +780,8 @@ export default function RetrievalExperiments() {
             </div>
           </div>
         )}
+
+        <BenchmarkPanel />
 
         <RunHistory runs={runs} loading={runsLoading} onRefresh={loadRuns} onRerun={setQuery} />
       </div>
