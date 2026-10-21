@@ -23,6 +23,11 @@ EMBED_TASK_QUERY: str = "RETRIEVAL_QUERY"
 # ---------------------------------------------------------------------------
 LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-3.6-flash")
 
+# Total attempts per Gemini call on a per-minute rate limit or a transient
+# server error (app/services.py, app/quota.py). Daily-quota errors are never
+# retried.
+GEMINI_RETRY_ATTEMPTS: int = int(os.getenv("GEMINI_RETRY_ATTEMPTS", "8"))
+
 # ---------------------------------------------------------------------------
 # Retrieval configuration
 # ---------------------------------------------------------------------------

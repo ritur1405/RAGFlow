@@ -33,9 +33,11 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
+from google.genai import errors as genai_errors
 from google.genai import types
 
 from app.config import LLM_MODEL
+from app.quota import is_daily_quota
 
 # Reuse the single client initialised in services.py rather than creating a
 # second one, matching how app/llm.py sources its client.
@@ -207,6 +209,11 @@ async def _call_gemini_judge(
                 latency_ms=elapsed_ms,
             )
         except Exception as exc:  # noqa: BLE001 - retried, then re-raised below
+            if isinstance(exc, genai_errors.APIError) and is_daily_quota(exc):
+                # Retrying cannot succeed until the quota resets.
+                raise JudgeUnavailableError(
+                    f"Gemini daily quota exhausted for the judge model: {exc.message}"
+                ) from exc
             last_error = exc
             logger.warning(
                 "Judge call failed (metric=%s, attempt=%d/%d): %s",

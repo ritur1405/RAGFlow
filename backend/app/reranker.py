@@ -43,6 +43,20 @@ def _get_encoder():
     return _encoder
 
 
+def warm_up() -> None:
+    """Loads the model ahead of the first query, so no request pays for it.
+
+    Without this the first reranked query also measures model loading
+    (several seconds), which would distort its latency in a benchmark.
+    Failure is logged, not raised: the app can still serve every other
+    configuration, and a reranked query will then raise as usual.
+    """
+    try:
+        _get_encoder()
+    except Exception:
+        logger.exception("Could not pre-load the cross-encoder reranker")
+
+
 def rerank(question: str, candidates: List[Document], top_k: int) -> List[Tuple[Document, float]]:
     """Returns the top_k candidates as (Document, logit) pairs, most relevant first."""
     if not candidates:

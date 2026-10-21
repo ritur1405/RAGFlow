@@ -596,6 +596,18 @@ class TestStartupWiring:
         create_all.assert_called_once()
         assert create_all.call_args.kwargs["bind"] is m.engine
 
+    def test_lifespan_warms_up_the_reranker(self, monkeypatch):
+        """The reranker model loads at startup, not inside the first query."""
+        import app.main as m
+
+        calls = []
+        monkeypatch.setattr(m, "warm_up_reranker", lambda: calls.append(True))
+        with patch.object(m.Base.metadata, "create_all"),              patch.object(m, "add_missing_columns"):
+            with TestClient(m.app):
+                pass
+
+        assert calls == [True]
+
     def test_eval_table_ddl_is_valid_on_a_real_database(self, tmp_path):
         """The evaluation tables' DDL executes for real (SQLite stand-in).
 
