@@ -102,7 +102,10 @@ def load_results(path: Path, dataset_name: str) -> dict:
 
 def plan_calls(todo: dict[str, list[dict]]) -> dict[str, int]:
     n = sum(len(qs) for qs in todo.values())
-    return {"generation": n, "judge": n, "embedding": n}
+    # The backend caches query embeddings, so each distinct question is
+    # embedded once however many configurations ask it.
+    distinct = len({q["question"] for qs in todo.values() for q in qs})
+    return {"generation": n, "judge": n, "embedding": distinct}
 
 
 def run(args, dataset: dict, data: dict) -> None:
@@ -140,30 +143,40 @@ def run(args, dataset: dict, data: dict) -> None:
     for config in args.configs:
         if not todo[config]:
             continue
-        started = time.perf_counter()
-        print(f"  {config:16} running {len(todo[config])} questions...", end="", flush=True)
-        resp = requests.post(
-            f"{args.api}/api/eval/run",
-            json={"dataset_name": dataset["dataset_name"], "questions": todo[config], "rag_configs": [config]},
-            headers=headers,
-            timeout=args.timeout,
-        )
-        elapsed = time.perf_counter() - started
-        if resp.status_code != 201:
-            print(f" FAILED after {elapsed:.0f}s: {resp.status_code} {resp.text[:300]}")
-            if resp.status_code == 503:
-                print("  The free-tier quota is likely spent; rerun later to continue from here.")
+        # Small batches: the server saves a run only when all its questions are
+        # scored, so one failure late in a 21-question request would discard
+        # every request already spent on it. A batch loses at most a few.
+        for start in range(0, len(todo[config]), args.batch_size):
+            batch = todo[config][start:start + args.batch_size]
+            started = time.perf_counter()
+            print(f"  {config:16} questions {start + 1}-{start + len(batch)} of {len(todo[config])}...",
+                  end="", flush=True)
+            try:
+                resp = requests.post(
+                    f"{args.api}/api/eval/run",
+                    json={"dataset_name": dataset["dataset_name"], "questions": batch, "rag_configs": [config]},
+                    headers=headers,
+                    timeout=args.timeout,
+                )
+            except requests.Timeout:
+                print(f" no response after {args.timeout}s; stopping. Rerun to continue.")
+                return
+            elapsed = time.perf_counter() - started
+            if resp.status_code != 201:
+                print(f" FAILED after {elapsed:.0f}s: {resp.status_code} {resp.text[:300]}")
+                if resp.status_code == 503:
+                    print("  The free-tier quota is likely spent; rerun later to continue from here.")
+                    return
                 break
-            continue
-        summary = resp.json()["runs"][0]
-        detail = requests.get(f"{args.api}/api/eval/results/{summary['run_id']}", timeout=60).json()
-        bucket = data["results"].setdefault(config, {})
-        for row in detail["results"]:
-            bucket[row["question"]] = row
-        data["runs"].append({"run_id": summary["run_id"], "rag_config": config, "questions": len(detail["results"]),
-                             "created_at": summary["created_at"]})
-        save(data, args)
-        print(f" done in {elapsed:.0f}s")
+            summary = resp.json()["runs"][0]
+            detail = requests.get(f"{args.api}/api/eval/results/{summary['run_id']}", timeout=60).json()
+            bucket = data["results"].setdefault(config, {})
+            for row in detail["results"]:
+                bucket[row["question"]] = row
+            data["runs"].append({"run_id": summary["run_id"], "rag_config": config,
+                                 "questions": len(detail["results"]), "created_at": summary["created_at"]})
+            save(data, args)
+            print(f" done in {elapsed:.0f}s")
 
 
 def save(data: dict, args) -> None:
@@ -332,7 +345,9 @@ def main():
     parser.add_argument("--plan", action="store_true", help="Print the call budget and exit.")
     parser.add_argument("--fresh", action="store_true", help="Discard saved results and start over.")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
-    parser.add_argument("--timeout", type=int, default=3600, help="Seconds per configuration request.")
+    parser.add_argument("--batch-size", type=int, default=3,
+                        help="Questions per request; results are saved after each batch.")
+    parser.add_argument("--timeout", type=int, default=3600, help="Seconds per batch request.")
     parser.add_argument("--report-only", action="store_true", help="Rebuild report and charts from results.json.")
     args = parser.parse_args()
 

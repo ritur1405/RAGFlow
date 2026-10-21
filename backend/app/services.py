@@ -1,3 +1,4 @@
+import functools
 import os
 import time
 from typing import Generator
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 # Model names and thresholds come from app.config, so LLM_MODEL and friends
 # set in the environment apply to every Gemini call, including this module's.
 from app.config import (
+    EMBED_TASK_QUERY,
     EMBEDDING_DIM,
     EMBEDDING_MODEL,
     GEMINI_RETRY_ATTEMPTS,
@@ -49,7 +51,25 @@ client.models.embed_content = with_quota_retry(
 
 
 def generate_embedding(text_content: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:
-    """Generates 768-dimensional vector embeddings using gemini-embedding-001."""
+    """Generates 768-dimensional vector embeddings using gemini-embedding-001.
+
+    Query embeddings are cached: the benchmark asks every question once per
+    RAG configuration, and the Ask page sees repeated questions, so without
+    the cache the same text would be embedded (and billed against the
+    free-tier quota) several times.
+    """
+    if task_type == EMBED_TASK_QUERY:
+        return list(_cached_query_embedding(EMBEDDING_MODEL, text_content))
+    return _embed(text_content, task_type)
+
+
+@functools.lru_cache(maxsize=1024)
+def _cached_query_embedding(model: str, text_content: str) -> tuple[float, ...]:
+    # model is part of the key so a changed EMBEDDING_MODEL never reuses stale vectors.
+    return tuple(_embed(text_content, EMBED_TASK_QUERY))
+
+
+def _embed(text_content: str, task_type: str) -> list[float]:
     response = client.models.embed_content(
         model=EMBEDDING_MODEL,
         contents=text_content,
