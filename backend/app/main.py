@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from app.database import Base, engine, get_db
 from app.models import Document
 from app.routers import eval as eval_router
+from app.routers import experiments as experiments_router
 from app.services import (
     generate_embedding,
     process_pdf,
@@ -42,6 +43,8 @@ app = FastAPI(title="RAGFlow Backend", lifespan=lifespan)
 
 # Week 6: generation-evaluation endpoints under /api/eval.
 app.include_router(eval_router.router)
+# Week 4: retrieval experiments (Dense vs BM25 vs Hybrid) under /api/experiments.
+app.include_router(experiments_router.router)
 
 # Enable CORS for frontend integration
 app.add_middleware(

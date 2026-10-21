@@ -105,3 +105,49 @@ class EvalResult(Base):
     judge_latency_ms = Column(Float, nullable=True)
 
     run = relationship("EvalRun", back_populates="results")
+
+
+# ---------------------------------------------------------------------------
+# Retrieval-experiment tables (Week 4)
+# ---------------------------------------------------------------------------
+# An ExperimentConfig is a named, reusable set of strategies plus top_k. Each
+# ExperimentRun records one strategy's ranked output for one query, so the
+# Dense vs BM25 vs Hybrid comparison can be reviewed after the fact.
+
+
+class ExperimentConfig(Base):
+    __tablename__ = "experiment_configs"
+
+    id = Column(String, primary_key=True)
+    name = Column(String, nullable=False, unique=True, index=True)
+    strategies = Column(JSON, nullable=False)  # list[str], RETRIEVER_REGISTRY keys
+    top_k = Column(Integer, nullable=False, default=5)
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    runs = relationship("ExperimentRun", back_populates="config")
+
+
+class ExperimentRun(Base):
+    __tablename__ = "experiment_runs"
+
+    id = Column(String, primary_key=True)
+    config_id = Column(
+        String, ForeignKey("experiment_configs.id"), nullable=True, index=True
+    )
+    query = Column(Text, nullable=False)
+    strategy = Column(String, nullable=False, index=True)
+    top_k = Column(Integer, nullable=False)
+
+    # completed | failed. A failed strategy keeps its error and no results,
+    # rather than being dropped from the comparison.
+    status = Column(String, nullable=False, default="completed")
+    error_message = Column(Text, nullable=True)
+
+    # Retrieval wall-clock time only; there is no generation in an experiment.
+    latency_ms = Column(Float, nullable=True)
+    # list[{"chunk_id", "file_name", "page_number", "score"}], best first.
+    results = Column(JSON, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utcnow, index=True)
+
+    config = relationship("ExperimentConfig", back_populates="runs")

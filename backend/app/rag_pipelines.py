@@ -8,9 +8,14 @@ generation-evaluation layer has something genuine to score:
     hybrid          -> dense + BM25 keyword search fused via Reciprocal Rank Fusion
     hybrid_reranker -> hybrid candidate pool re-scored by an LLM relevance judge
 
-All four are synchronous and take an explicit Session. The caller decides how
-to run them; see app/routers/eval.py, which dispatches them to a worker thread
-with a session of their own.
+Retrieval and generation are separate steps. Each configuration has a
+retrieve_* function returning ranked (Document, score) pairs, which the Week 4
+retrieval experiments call on their own, and a run_* function that adds
+citation-aware generation on top for the end-to-end benchmark.
+
+All of them are synchronous and take an explicit Session. The caller decides
+how to run them; see app/routers/eval.py, which dispatches them to a worker
+thread with a session of their own.
 
 Retrieval and generation are reused from the Week 3 modules and services layer
 rather than reimplemented: app.services.generate_embedding /
@@ -28,7 +33,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Callable, Dict, List
+from typing import Callable, Dict, List, Tuple
 
 from rank_bm25 import BM25Okapi
 from google.genai import types
@@ -52,6 +57,10 @@ logger = logging.getLogger("ragops.rag_pipelines")
 RERANK_CANDIDATE_POOL = 8
 # Chunks actually handed to the generator.
 FINAL_TOP_K = 3
+
+# Ranked (Document, score) pairs, best first. What the score means depends on
+# the retriever; see RETRIEVER_SCORE_LABELS.
+Ranked = List[Tuple[Document, float]]
 
 
 @dataclass
@@ -121,6 +130,10 @@ def _finish(question: str, context_docs: List[Document], start: float) -> Pipeli
     )
 
 
+def _docs(ranked: Ranked) -> List[Document]:
+    return [doc for doc, _score in ranked]
+
+
 def _dense_candidates(db: Session, question: str, top_k: int):
     """Embeds the question and returns (Document, distance) pairs from pgvector."""
     query_vector = generate_embedding(question, task_type=EMBED_TASK_QUERY)
@@ -132,11 +145,14 @@ def _dense_candidates(db: Session, question: str, top_k: int):
 # --------------------------------------------------------------------------
 
 
+def retrieve_baseline(db: Session, question: str, top_k: int = FINAL_TOP_K) -> Ranked:
+    """Plain top-k dense retrieval, no filtering. Score: L2 distance."""
+    return list(_dense_candidates(db, question, top_k=top_k))
+
+
 def run_baseline_rag(db: Session, question: str) -> PipelineResult:
     start = time.perf_counter()
-    results = _dense_candidates(db, question, top_k=FINAL_TOP_K)
-    context_docs = [doc for doc, _dist in results]
-    return _finish(question, context_docs, start)
+    return _finish(question, _docs(retrieve_baseline(db, question)), start)
 
 
 # --------------------------------------------------------------------------
@@ -144,19 +160,25 @@ def run_baseline_rag(db: Session, question: str) -> PipelineResult:
 # --------------------------------------------------------------------------
 
 
-def run_dense_rag(db: Session, question: str) -> PipelineResult:
-    start = time.perf_counter()
-    candidates = _dense_candidates(db, question, top_k=RERANK_CANDIDATE_POOL)
+def retrieve_dense(db: Session, question: str, top_k: int = FINAL_TOP_K) -> Ranked:
+    """Dense retrieval behind the L2 distance quality gate. Score: L2 distance."""
+    candidates = _dense_candidates(
+        db, question, top_k=max(RERANK_CANDIDATE_POOL, top_k)
+    )
     filtered = [
         (doc, dist) for doc, dist in candidates if dist <= MAX_RELEVANT_DISTANCE
     ]
     filtered.sort(key=lambda pair: pair[1])
-    context_docs = [doc for doc, _dist in filtered[:FINAL_TOP_K]]
-    return _finish(question, context_docs, start)
+    return filtered[:top_k]
+
+
+def run_dense_rag(db: Session, question: str) -> PipelineResult:
+    start = time.perf_counter()
+    return _finish(question, _docs(retrieve_dense(db, question)), start)
 
 
 # --------------------------------------------------------------------------
-# Config 3: Hybrid RAG - dense + BM25 fused with Reciprocal Rank Fusion
+# BM25 keyword retrieval (retrieval experiments only)
 # --------------------------------------------------------------------------
 
 
@@ -173,6 +195,7 @@ def _load_all_documents(db: Session) -> List[Document]:
         db.execute(
             select(
                 Document.id,
+                Document.file_name,
                 Document.title,
                 Document.content,
                 Document.page_number,
@@ -182,7 +205,7 @@ def _load_all_documents(db: Session) -> List[Document]:
     )
 
 
-def _bm25_rank(rows, question: str, top_k: int) -> List[Document]:
+def _bm25_scored(rows, question: str, top_k: int) -> Ranked:
     if not rows:
         return []
     tokenized_corpus = [row.content.lower().split() for row in rows]
@@ -191,21 +214,37 @@ def _bm25_rank(rows, question: str, top_k: int) -> List[Document]:
     ranked = sorted(zip(rows, scores), key=lambda pair: pair[1], reverse=True)
     # Detached Document instances: read-only carriers, never added to a session.
     return [
-        Document(
-            id=row.id,
-            title=row.title,
-            content=row.content,
-            page_number=row.page_number,
-            chunk_index=row.chunk_index,
+        (
+            Document(
+                id=row.id,
+                file_name=row.file_name,
+                title=row.title,
+                content=row.content,
+                page_number=row.page_number,
+                chunk_index=row.chunk_index,
+            ),
+            float(score),
         )
         for row, score in ranked[:top_k]
         if score > 0
     ]
 
 
-def _reciprocal_rank_fusion(
-    ranked_lists: List[List[Document]], top_k: int, k: int = 60
-) -> List[Document]:
+def _bm25_rank(rows, question: str, top_k: int) -> List[Document]:
+    return _docs(_bm25_scored(rows, question, top_k))
+
+
+def retrieve_bm25(db: Session, question: str, top_k: int = FINAL_TOP_K) -> Ranked:
+    """Keyword-only retrieval. Score: BM25 Okapi."""
+    return _bm25_scored(_load_all_documents(db), question, top_k=top_k)
+
+
+# --------------------------------------------------------------------------
+# Config 3: Hybrid RAG - dense + BM25 fused with Reciprocal Rank Fusion
+# --------------------------------------------------------------------------
+
+
+def _rrf_scored(ranked_lists: List[List[Document]], top_k: int, k: int = 60) -> Ranked:
     """Standard RRF: score = sum over lists of 1 / (k + rank)."""
     fused_scores: Dict[int, float] = {}
     doc_lookup: Dict[int, Document] = {}
@@ -216,19 +255,30 @@ def _reciprocal_rank_fusion(
     ordered_ids = sorted(
         fused_scores, key=lambda doc_id: fused_scores[doc_id], reverse=True
     )
-    return [doc_lookup[doc_id] for doc_id in ordered_ids[:top_k]]
+    return [(doc_lookup[doc_id], fused_scores[doc_id]) for doc_id in ordered_ids[:top_k]]
+
+
+def _reciprocal_rank_fusion(
+    ranked_lists: List[List[Document]], top_k: int, k: int = 60
+) -> List[Document]:
+    return _docs(_rrf_scored(ranked_lists, top_k=top_k, k=k))
+
+
+def retrieve_hybrid(db: Session, question: str, top_k: int = FINAL_TOP_K) -> Ranked:
+    """Dense + BM25 fused with Reciprocal Rank Fusion. Score: RRF."""
+    pool = max(RERANK_CANDIDATE_POOL, top_k)
+    dense_ranked = [doc for doc, _dist in _dense_candidates(db, question, pool)]
+    bm25_ranked = _bm25_rank(_load_all_documents(db), question, top_k=pool)
+    return _rrf_scored([dense_ranked, bm25_ranked], top_k=top_k)
 
 
 def _hybrid_candidates(db: Session, question: str, top_k: int) -> List[Document]:
-    dense_ranked = [doc for doc, _dist in _dense_candidates(db, question, RERANK_CANDIDATE_POOL)]
-    bm25_ranked = _bm25_rank(_load_all_documents(db), question, top_k=RERANK_CANDIDATE_POOL)
-    return _reciprocal_rank_fusion([dense_ranked, bm25_ranked], top_k=top_k)
+    return _docs(retrieve_hybrid(db, question, top_k=top_k))
 
 
 def run_hybrid_rag(db: Session, question: str) -> PipelineResult:
     start = time.perf_counter()
-    context_docs = _hybrid_candidates(db, question, top_k=FINAL_TOP_K)
-    return _finish(question, context_docs, start)
+    return _finish(question, _docs(retrieve_hybrid(db, question)), start)
 
 
 # --------------------------------------------------------------------------
@@ -246,7 +296,7 @@ Chunks:
 """
 
 
-def _llm_rerank(question: str, candidates: List[Document], top_k: int) -> List[Document]:
+def _llm_rerank_scored(question: str, candidates: List[Document], top_k: int) -> Ranked:
     """Re-orders candidates by an LLM relevance score.
 
     Raises on failure. Falling back to the incoming hybrid order would make
@@ -277,19 +327,32 @@ def _llm_rerank(question: str, candidates: List[Document], top_k: int) -> List[D
         logger.exception("LLM reranker failed for question=%r", question)
         raise RuntimeError(f"LLM reranker failed: {exc}") from exc
 
-    ranked = sorted(candidates, key=lambda doc: score_map.get(doc.id, 0.0), reverse=True)
-    return ranked[:top_k]
+    scored = [(doc, score_map.get(doc.id, 0.0)) for doc in candidates]
+    scored.sort(key=lambda pair: pair[1], reverse=True)
+    return scored[:top_k]
+
+
+def _llm_rerank(question: str, candidates: List[Document], top_k: int) -> List[Document]:
+    return _docs(_llm_rerank_scored(question, candidates, top_k))
+
+
+def retrieve_hybrid_reranker(
+    db: Session, question: str, top_k: int = FINAL_TOP_K
+) -> Ranked:
+    """Hybrid candidate pool re-scored by the reranker. Score: relevance 0-10."""
+    candidates = _hybrid_candidates(
+        db, question, top_k=max(RERANK_CANDIDATE_POOL, top_k)
+    )
+    return _llm_rerank_scored(question, candidates, top_k=top_k)
 
 
 def run_hybrid_rerank_rag(db: Session, question: str) -> PipelineResult:
     start = time.perf_counter()
-    candidates = _hybrid_candidates(db, question, top_k=RERANK_CANDIDATE_POOL)
-    context_docs = _llm_rerank(question, candidates, top_k=FINAL_TOP_K)
-    return _finish(question, context_docs, start)
+    return _finish(question, _docs(retrieve_hybrid_reranker(db, question)), start)
 
 
 # --------------------------------------------------------------------------
-# Registry
+# Registries
 # --------------------------------------------------------------------------
 # Keys are the RAGConfig enum values used by the API and the dashboard, so
 # there is no name translation anywhere in the call chain.
@@ -299,4 +362,22 @@ PIPELINE_REGISTRY: Dict[str, Callable[[Session, str], PipelineResult]] = {
     "dense": run_dense_rag,
     "hybrid": run_hybrid_rag,
     "hybrid_reranker": run_hybrid_rerank_rag,
+}
+
+# Retrieval-only strategies for the Week 4 experiments. BM25 is compared here
+# on its own; it is not one of the four end-to-end benchmark configurations.
+RETRIEVER_REGISTRY: Dict[str, Callable[..., Ranked]] = {
+    "baseline": retrieve_baseline,
+    "dense": retrieve_dense,
+    "bm25": retrieve_bm25,
+    "hybrid": retrieve_hybrid,
+    "hybrid_reranker": retrieve_hybrid_reranker,
+}
+
+RETRIEVER_SCORE_LABELS: Dict[str, str] = {
+    "baseline": "L2 distance (lower is closer)",
+    "dense": "L2 distance (lower is closer)",
+    "bm25": "BM25 score",
+    "hybrid": "RRF score",
+    "hybrid_reranker": "Reranker relevance (0-10)",
 }

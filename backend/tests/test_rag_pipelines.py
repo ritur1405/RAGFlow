@@ -15,7 +15,7 @@ from app.config import NO_ANSWER_MESSAGE
 from app.models import Document
 
 # Mirrors the row shape returned by _load_all_documents' select().
-Row = namedtuple("Row", "id title content page_number chunk_index")
+Row = namedtuple("Row", "id file_name title content page_number chunk_index")
 
 
 def _doc(doc_id: int, content: str) -> Document:
@@ -25,7 +25,10 @@ def _doc(doc_id: int, content: str) -> Document:
 
 
 def _row(doc_id: int, content: str) -> Row:
-    return Row(id=doc_id, title="doc.pdf", content=content, page_number=1, chunk_index=doc_id)
+    return Row(
+        id=doc_id, file_name="doc.pdf", title="doc.pdf", content=content,
+        page_number=1, chunk_index=doc_id,
+    )
 
 
 @pytest.fixture
@@ -202,3 +205,53 @@ class TestHybridRerankRag:
 
         client.models.generate_content.assert_not_called()
         assert result.answer == NO_ANSWER_MESSAGE
+
+
+class TestRetrievers:
+    """The retrieval-only entry points used by the Week 4 experiments."""
+
+    def test_retriever_registry_matches_experiment_strategies(self):
+        from app.routers.experiments import Strategy
+
+        assert set(rp.RETRIEVER_REGISTRY) == {s.value for s in Strategy}
+        assert set(rp.RETRIEVER_SCORE_LABELS) == set(rp.RETRIEVER_REGISTRY)
+
+    def test_bm25_returns_scores_and_file_names(self):
+        corpus = [
+            _row(1, "reciprocal rank fusion merges rankings"),
+            _row(2, "parking policy details"),
+            _row(3, "office furniture inventory"),
+        ]
+        with patch.object(rp, "_load_all_documents", return_value=corpus):
+            ranked = rp.retrieve_bm25(MagicMock(), "fusion", top_k=5)
+
+        assert [d.id for d, _ in ranked] == [1]
+        assert ranked[0][1] > 0
+        assert ranked[0][0].file_name == "doc.pdf"
+
+    def test_dense_honours_a_top_k_larger_than_the_pool(self):
+        with patch.object(rp, "generate_embedding", return_value=[0.1] * 768), \
+             patch.object(rp, "search_documents") as search:
+            search.return_value = [(_doc(i, str(i)), 0.1 * i / 2) for i in range(1, 11)]
+            ranked = rp.retrieve_dense(MagicMock(), "q", top_k=10)
+
+        assert search.call_args.kwargs["top_k"] == 10
+        # 0.05 .. 0.5 are all inside the 0.8 gate, sorted by distance.
+        assert [d.id for d, _ in ranked] == list(range(1, 11))
+
+    def test_hybrid_scores_are_rrf_and_descending(self):
+        corpus = [
+            _row(2, "revenue grew strongly"),
+            _row(3, "parking policy details"),
+            _row(4, "office furniture inventory"),
+        ]
+        with patch.object(rp, "generate_embedding", return_value=[0.1] * 768), \
+             patch.object(rp, "search_documents", return_value=[(_doc(2, "a"), 0.1)]), \
+             patch.object(rp, "_load_all_documents", return_value=corpus):
+            ranked = rp.retrieve_hybrid(MagicMock(), "revenue", top_k=3)
+
+        # Doc 2 is first in both lists: 2 / (60 + 1).
+        assert ranked[0][0].id == 2
+        assert ranked[0][1] == pytest.approx(2 / 61)
+        scores = [s for _, s in ranked]
+        assert scores == sorted(scores, reverse=True)
