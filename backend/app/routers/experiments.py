@@ -64,7 +64,7 @@ STRATEGY_LABELS = {
     Strategy.DENSE: "Dense",
     Strategy.BM25: "BM25",
     Strategy.HYBRID: "Hybrid (RRF)",
-    Strategy.HYBRID_RERANKER: "Hybrid + Reranker",
+    Strategy.HYBRID_RERANKER: "Hybrid + Cross-Encoder",
 }
 
 # The plan's Week 4 deliverable: Dense vs BM25 vs Hybrid.

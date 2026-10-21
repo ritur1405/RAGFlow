@@ -6,7 +6,7 @@ generation-evaluation layer has something genuine to score:
     baseline        -> plain top-k dense vector search, no filtering
     dense           -> dense search with an L2 distance quality gate
     hybrid          -> dense + BM25 keyword search fused via Reciprocal Rank Fusion
-    hybrid_reranker -> hybrid candidate pool re-scored by an LLM relevance judge
+    hybrid_reranker -> hybrid candidate pool re-scored by a cross-encoder
 
 Retrieval and generation are separate steps. Each configuration has a
 retrieve_* function returning ranked (Document, score) pairs, which the Week 4
@@ -29,27 +29,25 @@ then be filed under a label that does not describe them.
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Tuple
 
 from rank_bm25 import BM25Okapi
-from google.genai import types
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.config import (
     EMBED_TASK_QUERY,
-    LLM_MODEL,
     MAX_RELEVANT_DISTANCE,
     NO_ANSWER_MESSAGE,
 )
 from app.eval_generation import extract_citation_ids
 from app.llm import generate_answer as llm_generate_answer
 from app.models import Document
-from app.services import client as gemini_client, generate_embedding, search_documents
+from app.reranker import rerank as cross_encoder_rerank
+from app.services import generate_embedding, search_documents
 
 logger = logging.getLogger("ragops.rag_pipelines")
 
@@ -282,68 +280,21 @@ def run_hybrid_rag(db: Session, question: str) -> PipelineResult:
 
 
 # --------------------------------------------------------------------------
-# Config 4: Hybrid + Reranker - hybrid pool re-scored by an LLM
+# Config 4: Hybrid + Reranker - hybrid pool re-scored by a cross-encoder
 # --------------------------------------------------------------------------
-
-_RERANK_PROMPT = """Rate how relevant each chunk below is for answering the question, on a
-scale of 0 (irrelevant) to 10 (directly answers it). Respond ONLY with JSON:
-{{"scores": [{{"chunk_id": 12, "relevance": 8}}]}}
-
-Question: {question}
-
-Chunks:
-{numbered}
-"""
-
-
-def _llm_rerank_scored(question: str, candidates: List[Document], top_k: int) -> Ranked:
-    """Re-orders candidates by an LLM relevance score.
-
-    Raises on failure. Falling back to the incoming hybrid order would make
-    this configuration silently identical to plain hybrid while still being
-    recorded as "hybrid_reranker" -- a mislabelled result is worse than a
-    failed run.
-    """
-    if not candidates:
-        return []
-
-    numbered = "\n\n".join(f"[chunk_id={doc.id}] {doc.content}" for doc in candidates)
-    prompt = _RERANK_PROMPT.format(question=question, numbered=numbered)
-
-    try:
-        response = gemini_client.models.generate_content(
-            model=LLM_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json", temperature=0.0
-            ),
-        )
-        parsed = json.loads(response.text)
-        score_map = {
-            int(item["chunk_id"]): float(item["relevance"])
-            for item in parsed.get("scores", [])
-        }
-    except Exception as exc:
-        logger.exception("LLM reranker failed for question=%r", question)
-        raise RuntimeError(f"LLM reranker failed: {exc}") from exc
-
-    scored = [(doc, score_map.get(doc.id, 0.0)) for doc in candidates]
-    scored.sort(key=lambda pair: pair[1], reverse=True)
-    return scored[:top_k]
-
-
-def _llm_rerank(question: str, candidates: List[Document], top_k: int) -> List[Document]:
-    return _docs(_llm_rerank_scored(question, candidates, top_k))
 
 
 def retrieve_hybrid_reranker(
     db: Session, question: str, top_k: int = FINAL_TOP_K
 ) -> Ranked:
-    """Hybrid candidate pool re-scored by the reranker. Score: relevance 0-10."""
+    """Hybrid candidate pool re-scored by the cross-encoder. Score: logit.
+
+    Raises if the reranker fails; see app/reranker.py.
+    """
     candidates = _hybrid_candidates(
         db, question, top_k=max(RERANK_CANDIDATE_POOL, top_k)
     )
-    return _llm_rerank_scored(question, candidates, top_k=top_k)
+    return cross_encoder_rerank(question, candidates, top_k=top_k)
 
 
 def run_hybrid_rerank_rag(db: Session, question: str) -> PipelineResult:
@@ -379,5 +330,5 @@ RETRIEVER_SCORE_LABELS: Dict[str, str] = {
     "dense": "L2 distance (lower is closer)",
     "bm25": "BM25 score",
     "hybrid": "RRF score",
-    "hybrid_reranker": "Reranker relevance (0-10)",
+    "hybrid_reranker": "Cross-encoder logit (higher is more relevant)",
 }

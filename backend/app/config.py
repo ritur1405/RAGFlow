@@ -36,6 +36,10 @@ TOP_K: int = int(os.getenv("RAG_TOP_K", "5"))
 # typical document domain.
 MAX_RELEVANT_DISTANCE: float = float(os.getenv("RAG_MAX_DISTANCE", "0.8"))
 
+# Cross-encoder used by the hybrid_reranker configuration (app/reranker.py).
+# Any reranker fastembed supports works, e.g. "BAAI/bge-reranker-base".
+RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", "Xenova/ms-marco-MiniLM-L-6-v2")
+
 # ---------------------------------------------------------------------------
 # Answer constants
 # ---------------------------------------------------------------------------
