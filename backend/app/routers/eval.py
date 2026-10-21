@@ -7,6 +7,8 @@ Flow for a single question, per RAG configuration:
       -> retrieved context + answer + citations
       -> run_generation_eval              (real Gemini LLM-as-a-judge)
       -> four metrics + weighted overall
+      -> score_retrieval                  (Recall/Precision@K, MRR, nDCG@K,
+                                           when the question has page labels)
       -> EvalResult / EvalRun rows
       -> dashboard reads /compare and /results/{run_id}
 
@@ -24,10 +26,12 @@ threads. The request-scoped session is used only for persistence.
 from __future__ import annotations
 
 import enum
+import json
 import logging
 import uuid
 from datetime import datetime
-from typing import Optional
+from pathlib import Path
+from typing import Annotated, Optional
 
 import anyio.to_thread
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -44,12 +48,16 @@ from app.eval_generation import (
     judge_available,
     run_generation_eval,
 )
+from app.eval_retrieval import score_retrieval
 from app.models import EvalResult, EvalRun, utcnow
-from app.rag_pipelines import PIPELINE_REGISTRY, PipelineResult
+from app.rag_pipelines import FINAL_TOP_K, PIPELINE_REGISTRY, PipelineResult
 
 logger = logging.getLogger("ragops.eval_router")
 
 router = APIRouter(prefix="/api/eval", tags=["evaluation"])
+
+# The shared, page-labelled benchmark every configuration is compared on.
+BENCHMARK_PATH = Path(__file__).resolve().parents[2] / "benchmarks" / "ragops_benchmark.json"
 
 
 # --------------------------------------------------------------------------- #
@@ -87,6 +95,11 @@ assert {c.value for c in RAGConfig} == set(PIPELINE_REGISTRY), (
 class BenchmarkQuestion(BaseModel):
     question: str = Field(..., min_length=1)
     ground_truth: Optional[str] = None
+    # Relevance labels for the retrieval metrics. A retrieved chunk counts as
+    # relevant when it comes from one of these pages of source_file. Without
+    # labels the question is still judged, but has no retrieval metrics.
+    source_file: Optional[str] = None
+    relevant_pages: list[Annotated[int, Field(ge=1)]] = Field(default_factory=list)
 
 
 class EvalRunRequest(BaseModel):
@@ -114,6 +127,12 @@ class EvalRunSummary(BaseModel):
     avg_citation_accuracy: Optional[float]
     avg_overall_score: Optional[float]
     avg_latency_ms: Optional[float]
+    retrieval_k: Optional[int] = None
+    num_labelled: Optional[int] = None
+    avg_precision_at_k: Optional[float] = None
+    avg_recall_at_k: Optional[float] = None
+    avg_mrr: Optional[float] = None
+    avg_ndcg_at_k: Optional[float] = None
     created_at: datetime
     completed_at: Optional[datetime]
 
@@ -125,6 +144,14 @@ class EvalRunResponse(BaseModel):
 class MetricDetail(BaseModel):
     score: float
     reasoning: Optional[str]
+
+
+class RetrievalDetail(BaseModel):
+    k: int
+    precision_at_k: float
+    recall_at_k: float
+    reciprocal_rank: float
+    ndcg_at_k: float
 
 
 class EvalResultDetail(BaseModel):
@@ -141,6 +168,10 @@ class EvalResultDetail(BaseModel):
     overall_score: float
     pipeline_latency_ms: Optional[float]
     judge_latency_ms: Optional[float]
+    source_file: Optional[str] = None
+    relevant_pages: list[int] = Field(default_factory=list)
+    retrieved_pages: list[Optional[int]] = Field(default_factory=list)
+    retrieval: Optional[RetrievalDetail] = None
 
 
 class EvalResultsResponse(BaseModel):
@@ -160,6 +191,12 @@ class CompareRow(BaseModel):
     avg_citation_accuracy: Optional[float]
     avg_overall_score: Optional[float]
     avg_latency_ms: Optional[float]
+    retrieval_k: Optional[int] = None
+    num_labelled: Optional[int] = None
+    avg_precision_at_k: Optional[float] = None
+    avg_recall_at_k: Optional[float] = None
+    avg_mrr: Optional[float] = None
+    avg_ndcg_at_k: Optional[float] = None
     created_at: Optional[datetime]
 
 
@@ -208,9 +245,21 @@ def _summary_from_run(run: EvalRun) -> EvalRunSummary:
         avg_citation_accuracy=run.avg_citation_accuracy,
         avg_overall_score=run.avg_overall_score,
         avg_latency_ms=run.avg_latency_ms,
+        **_retrieval_aggregates(run),
         created_at=run.created_at,
         completed_at=run.completed_at,
     )
+
+
+def _retrieval_aggregates(run: EvalRun) -> dict:
+    return {
+        "retrieval_k": run.retrieval_k,
+        "num_labelled": run.num_labelled,
+        "avg_precision_at_k": run.avg_precision_at_k,
+        "avg_recall_at_k": run.avg_recall_at_k,
+        "avg_mrr": run.avg_mrr,
+        "avg_ndcg_at_k": run.avg_ndcg_at_k,
+    }
 
 
 def _mark_failed(db: Session, run: EvalRun, exc: Exception) -> None:
@@ -224,6 +273,12 @@ def _mark_failed(db: Session, run: EvalRun, exc: Exception) -> None:
     run.avg_citation_accuracy = None
     run.avg_overall_score = None
     run.avg_latency_ms = None
+    run.retrieval_k = None
+    run.num_labelled = None
+    run.avg_precision_at_k = None
+    run.avg_recall_at_k = None
+    run.avg_mrr = None
+    run.avg_ndcg_at_k = None
     db.commit()
 
 
@@ -279,6 +334,8 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
             "overall": 0.0,
             "latency": 0.0,
         }
+        retrieval_totals = {"precision": 0.0, "recall": 0.0, "rr": 0.0, "ndcg": 0.0}
+        num_labelled = 0
 
         try:
             for q in payload.questions:
@@ -297,7 +354,15 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
                     cited_chunk_ids=pipeline_out.cited_chunk_ids,
                 )
 
-                # 3. Persist the measurement.
+                # 3. Retrieval metrics against the question's page labels.
+                retrieval = score_retrieval(
+                    pipeline_out.context_docs,
+                    q.source_file,
+                    q.relevant_pages,
+                    k=FINAL_TOP_K,
+                )
+
+                # 4. Persist the measurement.
                 db.add(
                     EvalResult(
                         id=str(uuid.uuid4()),
@@ -318,8 +383,22 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
                         overall_score=eval_result.overall_score,
                         pipeline_latency_ms=pipeline_out.latency_ms,
                         judge_latency_ms=eval_result.total_latency_ms,
+                        source_file=q.source_file,
+                        relevant_pages=q.relevant_pages or None,
+                        retrieved_pages=[doc.page_number for doc in pipeline_out.context_docs],
+                        precision_at_k=retrieval.precision_at_k if retrieval else None,
+                        recall_at_k=retrieval.recall_at_k if retrieval else None,
+                        reciprocal_rank=retrieval.reciprocal_rank if retrieval else None,
+                        ndcg_at_k=retrieval.ndcg_at_k if retrieval else None,
                     )
                 )
+
+                if retrieval:
+                    num_labelled += 1
+                    retrieval_totals["precision"] += retrieval.precision_at_k
+                    retrieval_totals["recall"] += retrieval.recall_at_k
+                    retrieval_totals["rr"] += retrieval.reciprocal_rank
+                    retrieval_totals["ndcg"] += retrieval.ndcg_at_k
 
                 totals["faithfulness"] += eval_result.faithfulness.score
                 totals["answer_relevance"] += eval_result.answer_relevance.score
@@ -335,6 +414,13 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
             run.avg_citation_accuracy = totals["citation_accuracy"] / n
             run.avg_overall_score = totals["overall"] / n
             run.avg_latency_ms = totals["latency"] / n
+            if num_labelled:
+                run.retrieval_k = FINAL_TOP_K
+                run.num_labelled = num_labelled
+                run.avg_precision_at_k = retrieval_totals["precision"] / num_labelled
+                run.avg_recall_at_k = retrieval_totals["recall"] / num_labelled
+                run.avg_mrr = retrieval_totals["rr"] / num_labelled
+                run.avg_ndcg_at_k = retrieval_totals["ndcg"] / num_labelled
             run.status = "completed"
             run.completed_at = utcnow()
             db.commit()
@@ -364,6 +450,15 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
             ) from exc
 
     return EvalRunResponse(runs=[_summary_from_run(r) for r in completed])
+
+
+@router.get("/benchmark")
+def get_benchmark():
+    """The shared benchmark dataset, so the dashboard can run it as-is."""
+    try:
+        return json.loads(BENCHMARK_PATH.read_text(encoding="utf-8"))
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Benchmark dataset not found.")
 
 
 @router.get("/compare", response_model=CompareResponse)
@@ -422,6 +517,7 @@ def compare_configs(
                     avg_citation_accuracy=run.avg_citation_accuracy,
                     avg_overall_score=run.avg_overall_score,
                     avg_latency_ms=run.avg_latency_ms,
+                    **_retrieval_aggregates(run),
                     created_at=run.created_at,
                 )
             )
@@ -468,6 +564,20 @@ def get_results(run_id: str, db: Session = Depends(get_db)):
             overall_score=row.overall_score,
             pipeline_latency_ms=row.pipeline_latency_ms,
             judge_latency_ms=row.judge_latency_ms,
+            source_file=row.source_file,
+            relevant_pages=row.relevant_pages or [],
+            retrieved_pages=row.retrieved_pages or [],
+            retrieval=(
+                RetrievalDetail(
+                    k=run.retrieval_k or FINAL_TOP_K,
+                    precision_at_k=row.precision_at_k,
+                    recall_at_k=row.recall_at_k,
+                    reciprocal_rank=row.reciprocal_rank,
+                    ndcg_at_k=row.ndcg_at_k,
+                )
+                if row.precision_at_k is not None
+                else None
+            ),
         )
         for row in rows
     ]

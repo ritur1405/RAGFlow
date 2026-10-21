@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 
-from app.database import Base, engine, get_db
+from app.database import Base, add_missing_columns, engine, get_db
 from app.models import Document
 from app.routers import eval as eval_router
 from app.routers import experiments as experiments_router
@@ -36,6 +36,8 @@ async def lifespan(app: FastAPI):
     app, not to loading it.
     """
     Base.metadata.create_all(bind=engine)
+    # Databases created before newer nullable columns existed get them added.
+    add_missing_columns(engine)
     yield
 
 

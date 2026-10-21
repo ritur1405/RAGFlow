@@ -1,0 +1,168 @@
+{
+  "dataset_name": "beir-paper-v1",
+  "description": "22 questions about the BEIR paper, labelled with the PDF pages that answer them. Mixes factual lookups, keyword-heavy questions (exact names and numbers, where BM25 should help) and paraphrased questions that share little vocabulary with the text (where dense retrieval should help).",
+  "source": {
+    "file_name": "beir-2104.08663v4.pdf",
+    "title": "BEIR: A Heterogeneous Benchmark for Zero-shot Evaluation of Information Retrieval Models",
+    "authors": "Nandan Thakur, Nils Reimers, Andreas Rücklé, Abhishek Srivastava, Iryna Gurevych",
+    "url": "https://arxiv.org/abs/2104.08663v4",
+    "license": "CC BY-SA 4.0",
+    "sha256": "1925755aeb627123d1a63c66f02e5aa2432f7e92751a02bea7c8c3b6bbb6ec33"
+  },
+  "questions": [
+    {
+      "question": "How many datasets and how many retrieval tasks does BEIR include?",
+      "ground_truth": "BEIR includes 18 English zero-shot evaluation datasets drawn from 9 heterogeneous retrieval tasks.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [1, 2, 3],
+      "type": "factual"
+    },
+    {
+      "question": "Which retrieval architecture achieved the best zero-shot performance on BEIR?",
+      "ground_truth": "The re-ranking model BM25+CE (a cross-encoder re-ranking BM25 results) performed best, outperforming BM25 on 16 of 18 datasets and improving on it by about 11% on average.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [1, 7, 8],
+      "type": "factual"
+    },
+    {
+      "question": "What k and b parameters were used for Anserini BM25?",
+      "ground_truth": "The default Lucene parameters, k=0.9 and b=0.4.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [5],
+      "type": "keyword"
+    },
+    {
+      "question": "Which single evaluation metric does BEIR report for every dataset, and at what cutoff?",
+      "ground_truth": "nDCG@10, computed with the Python interface of the official TREC evaluation tool.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [5],
+      "type": "keyword"
+    },
+    {
+      "question": "Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?",
+      "ground_truth": "Precision and recall are rank-unaware, and binary rank-aware metrics like MRR and MAP cannot evaluate tasks with graded relevance judgements; nDCG@k handles both binary and graded relevance.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [5],
+      "type": "paraphrase"
+    },
+    {
+      "question": "How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?",
+      "ground_truth": "It re-ranks the top-100 BM25 (Anserini) hits with a 6-layer, 384-hidden MiniLM cross-encoder trained on MS MARCO with knowledge distillation from a BERT-base, BERT-large and ALBERT-large teacher ensemble.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [6],
+      "type": "keyword"
+    },
+    {
+      "question": "How slow is BM25+CE per query on 1 million DBPedia documents?",
+      "ground_truth": "About 450 ms on a GPU and 6100 ms on a CPU, the slowest of the evaluated models.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [8],
+      "type": "factual"
+    },
+    {
+      "question": "How much storage does a ColBERT index need compared with BM25?",
+      "ground_truth": "ColBERT needs about 20GB for 1M DBPedia documents versus 0.4GB for BM25, and about 900GB for the 15M-document BioASQ corpus versus 18GB for BM25.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [8],
+      "type": "factual"
+    },
+    {
+      "question": "Why can a keyword-based search engine miss relevant documents that use different wording from the query?",
+      "ground_truth": "Lexical approaches like BM25 suffer from the lexical gap: they only retrieve documents containing the query's keywords, and they treat text as a bag of words that ignores word order.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [1, 3],
+      "type": "paraphrase"
+    },
+    {
+      "question": "What does Hole@10 measure, and what values did BM25 and TAS-B get?",
+      "ground_truth": "Hole@10 is the share of a system's top-10 hits that annotators never judged. BM25 had 6.4% and TAS-B 31.8% on TREC-COVID.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [9],
+      "type": "keyword"
+    },
+    {
+      "question": "After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?",
+      "ground_truth": "ANCE's nDCG@10 rose from 0.654 to 0.735, 6.7 points above BM25.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [9],
+      "type": "factual"
+    },
+    {
+      "question": "Which BEIR dataset has the longest queries?",
+      "ground_truth": "ArguAna, with an average query length of about 193 words; all other datasets have short queries of a sentence or a few keywords.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [4],
+      "type": "factual"
+    },
+    {
+      "question": "What nDCG@10 did BM25 and BM25+CE get on SciFact?",
+      "ground_truth": "BM25 scored 0.665 and BM25+CE scored 0.688 on SciFact.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [7],
+      "type": "keyword"
+    },
+    {
+      "question": "Why do some dense retrievers favour short documents while others favour long ones?",
+      "ground_truth": "It comes from the similarity function used in training: cosine similarity uses unit-length vectors with no notion of text length and prefers shorter documents (as TAS-B does), while dot product gives longer documents larger vector magnitudes and higher scores (as ANCE does).",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [7, 21],
+      "type": "paraphrase"
+    },
+    {
+      "question": "How does docT5query expand a document?",
+      "ground_truth": "A T5-base model trained on MS MARCO generates 40 synthetic queries per document, which are appended to the document before indexing it with BM25.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [3, 6],
+      "type": "keyword"
+    },
+    {
+      "question": "What negatives was DPR trained with, and on which datasets was the Multi model trained?",
+      "ground_truth": "DPR uses a single BM25 hard negative plus in-batch negatives; the Multi-DPR model was trained on NQ, TriviaQA, WebQuestions and CuratedTREC.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [6],
+      "type": "keyword"
+    },
+    {
+      "question": "Does doing well on MS MARCO tell you a model will do well on unseen domains?",
+      "ground_truth": "No. In-domain performance does not predict out-of-domain generalization: BM25 trails neural models by 7-18 points on MS MARCO but is a strong zero-shot baseline that beats many of them on BEIR.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [2, 6, 9],
+      "type": "paraphrase"
+    },
+    {
+      "question": "How did the authors quantify how similar the domains of two datasets are?",
+      "ground_truth": "With a pairwise weighted Jaccard similarity over unigram word overlap: the sum over words of the minimum normalized frequency divided by the sum of the maximum normalized frequency.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [4, 20],
+      "type": "paraphrase"
+    },
+    {
+      "question": "What is capped recall and why is it needed?",
+      "ground_truth": "R_cap@k divides the relevant documents retrieved in the top k by min(k, number of relevant documents) instead of the total, because with more than k relevant documents ordinary recall@k cannot reach 1 and becomes unintuitive.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [20, 21],
+      "type": "keyword"
+    },
+    {
+      "question": "What limitations of the benchmark do the authors acknowledge?",
+      "ground_truth": "It is English-only, lacks long-document retrieval, covers only pure textual search without signals like recency or clicks, uses at most one or two fields per document, and favours general models over task-specific ones.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [17],
+      "type": "paraphrase"
+    },
+    {
+      "question": "On which datasets did the cross-encoder re-ranker fail to beat BM25?",
+      "ground_truth": "ArguAna and Touché-2020, two tasks very different from its MS MARCO training data.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [7],
+      "type": "factual"
+    },
+    {
+      "question": "What hardware was used to measure retrieval latency?",
+      "ground_truth": "An 8-core Intel Xeon Platinum 8168 CPU at 2.70GHz and a single Nvidia Tesla V100 GPU with CUDA 11.0.",
+      "source_file": "beir-2104.08663v4.pdf",
+      "relevant_pages": [8],
+      "type": "keyword"
+    }
+  ]
+}

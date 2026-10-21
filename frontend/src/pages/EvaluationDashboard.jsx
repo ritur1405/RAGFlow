@@ -19,6 +19,11 @@ import { fetchJSON, fmtLatency, postJSON } from "../lib/api.js";
  * Consumes:
  *   GET  /api/eval/compare              -> aggregate metrics for all 4 RAG configs
  *   GET  /api/eval/results/:run_id      -> per-question judge scores + reasoning
+ *   GET  /api/eval/benchmark            -> the shared page-labelled benchmark
+ *
+ * Two families of metrics: generation quality from the LLM judge, and
+ * retrieval quality (Recall@K, Precision@K, MRR, nDCG@K) against the
+ * benchmark's page labels.
  *
  * Visual language: a dark "lab console" palette (deep teal-charcoal surfaces,
  * a mint-signal accent for strong scores, amber/coral for mid/weak scores) with
@@ -38,6 +43,13 @@ const METRIC_META = [
   { key: "avg_answer_relevance", label: "Answer Relevance" },
   { key: "avg_context_relevance", label: "Context Relevance" },
   { key: "avg_citation_accuracy", label: "Citation Accuracy" },
+];
+
+const RETRIEVAL_META = [
+  { key: "avg_recall_at_k", label: "Recall@K" },
+  { key: "avg_precision_at_k", label: "Precision@K" },
+  { key: "avg_mrr", label: "MRR" },
+  { key: "avg_ndcg_at_k", label: "nDCG@K" },
 ];
 
 function scoreTone(score) {
@@ -111,10 +123,21 @@ function SummaryCard({ label, value, sublabel, tone }) {
 /* ------------------------------------------------------------------ */
 
 function ComparisonTable({ configs, onSelectRun, selectedRunId }) {
+  const retrievalK = configs.find((c) => c.retrieval_k)?.retrieval_k;
   return (
     <div className="rounded-md border border-[#2A3B36] bg-[#16211E] overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
+          <tr className="text-[11px] uppercase tracking-wider text-[#5F726B]">
+            <th />
+            <th colSpan={METRIC_META.length + 1} className="px-4 pt-3 font-normal text-right">
+              Generation · LLM judge
+            </th>
+            <th colSpan={RETRIEVAL_META.length} className="border-l border-[#2A3B36] px-4 pt-3 font-normal text-right">
+              Retrieval{retrievalK ? ` · K=${retrievalK}` : ""}
+            </th>
+            <th colSpan={2} />
+          </tr>
           <tr className="border-b border-[#2A3B36] text-left text-[#8FA39B]">
             <th className="px-4 py-3 font-normal">Configuration</th>
             {METRIC_META.map((m) => (
@@ -123,6 +146,14 @@ function ComparisonTable({ configs, onSelectRun, selectedRunId }) {
               </th>
             ))}
             <th className="px-4 py-3 font-normal text-right">Overall</th>
+            {RETRIEVAL_META.map((m, i) => (
+              <th
+                key={m.key}
+                className={`px-4 py-3 font-normal text-right ${i === 0 ? "border-l border-[#2A3B36]" : ""}`}
+              >
+                {m.label}
+              </th>
+            ))}
             <th className="px-4 py-3 font-normal text-right">Avg Latency</th>
             <th className="px-4 py-3 font-normal text-right">Questions</th>
           </tr>
@@ -156,6 +187,14 @@ function ComparisonTable({ configs, onSelectRun, selectedRunId }) {
                 <td className="px-4 py-3 text-right">
                   <ScoreText score={row.avg_overall_score} />
                 </td>
+                {RETRIEVAL_META.map((m, i) => (
+                  <td
+                    key={m.key}
+                    className={`px-4 py-3 text-right ${i === 0 ? "border-l border-[#2A3B36]" : ""}`}
+                  >
+                    <ScoreText score={row[m.key]} />
+                  </td>
+                ))}
                 <td className="px-4 py-3 text-right font-mono text-[#C7D3CE]">
                   {fmtLatency(row.avg_latency_ms)}
                 </td>
@@ -175,8 +214,8 @@ function ComparisonTable({ configs, onSelectRun, selectedRunId }) {
 /* Bar chart                                                          */
 /* ------------------------------------------------------------------ */
 
-function MetricBarChart({ configs }) {
-  const chartData = METRIC_META.map((m) => {
+function MetricBarChart({ configs, metrics, title }) {
+  const chartData = metrics.map((m) => {
     const row = { metric: m.label };
     configs.forEach((c) => {
       row[c.rag_config] = c[m.key] ?? 0;
@@ -186,7 +225,7 @@ function MetricBarChart({ configs }) {
 
   return (
     <div className="rounded-md border border-[#2A3B36] bg-[#16211E] p-4">
-      <p className="text-[13px] text-[#8FA39B] mb-4">Metric comparison across configurations</p>
+      <p className="text-[13px] text-[#8FA39B] mb-4">{title}</p>
       <ResponsiveContainer width="100%" height={300}>
         <BarChart data={chartData} margin={{ top: 4, right: 8, left: -12, bottom: 4 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="#233330" vertical={false} />
@@ -253,6 +292,51 @@ function CitationCheck({ contextIds, citedIds }) {
   );
 }
 
+/** Which ranked chunks came from a labelled page, plus the four retrieval scores. */
+function RetrievalCheck({ item }) {
+  const relevant = new Set(item.relevant_pages);
+  const r = item.retrieval;
+  return (
+    <div className="mt-3 rounded border border-[#2A3B36] bg-[#121C19] p-3">
+      <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[12px] text-[#8FA39B]">Retrieved pages</span>
+        {item.retrieved_pages.map((page, i) => {
+          const hit = relevant.has(page);
+          return (
+            <span
+              key={i}
+              title={hit ? "From a labelled page" : "Not from a labelled page"}
+              className={`font-mono text-[11px] px-2 py-0.5 rounded border ${
+                hit
+                  ? "border-[#2F5C4A] bg-[#16281F] text-[#7CE0B8]"
+                  : "border-[#3A4C46] text-[#5F726B]"
+              }`}
+            >
+              #{i + 1} p.{page ?? "?"}
+            </span>
+          );
+        })}
+        <span className="ml-2 text-[11px] text-[#5F726B]">
+          labelled: p.{item.relevant_pages.join(", p.")}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-2 text-[12px] md:grid-cols-4">
+        {[
+          ["Recall@" + r.k, r.recall_at_k],
+          ["Precision@" + r.k, r.precision_at_k],
+          ["Reciprocal rank", r.reciprocal_rank],
+          ["nDCG@" + r.k, r.ndcg_at_k],
+        ].map(([label, value]) => (
+          <div key={label} className="flex items-center justify-between gap-2">
+            <span className="text-[#8FA39B]">{label}</span>
+            <ScoreText score={value} />
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function MetricRow({ label, detail }) {
   return (
     <div className="py-2.5 border-b border-[#20302B] last:border-b-0">
@@ -278,6 +362,11 @@ function QuestionAccordionItem({ item, isOpen, onToggle }) {
           <p className="text-[14px] text-[#E8EDE9] truncate">{item.question}</p>
         </div>
         <div className="flex items-center gap-4 shrink-0">
+          {item.retrieval && (
+            <span className="hidden text-[11px] text-[#5F726B] md:inline">
+              nDCG <ScoreText score={item.retrieval.ndcg_at_k} />
+            </span>
+          )}
           <ScoreText score={item.overall_score} />
           <span
             className={`font-mono text-[#5F726B] transition-transform ${isOpen ? "rotate-90" : ""}`}
@@ -312,8 +401,10 @@ function QuestionAccordionItem({ item, isOpen, onToggle }) {
             <MetricRow label="Citation Accuracy" detail={item.citation_accuracy} />
           </div>
 
+          {item.retrieval && <RetrievalCheck item={item} />}
+
           <p className="text-[11.5px] text-[#5F726B] mt-2 font-mono">
-            latency: {fmtLatency(item.latency_ms)}
+            pipeline: {fmtLatency(item.pipeline_latency_ms)} · judge: {fmtLatency(item.judge_latency_ms)}
           </p>
         </div>
       )}
@@ -403,7 +494,30 @@ function RunEvaluationPanel({ onCompleted }) {
   const [error, setError] = useState(null);
   const [finished, setFinished] = useState(null);
 
-  const questions = useMemo(() => parseQuestions(rawQuestions), [rawQuestions]);
+  // The loaded benchmark keeps its page labels, which the one-line-per-question
+  // text format cannot express. Editing the text drops back to typed questions.
+  const [benchmark, setBenchmark] = useState(null);
+  const [loadingBenchmark, setLoadingBenchmark] = useState(false);
+
+  const typedQuestions = useMemo(() => parseQuestions(rawQuestions), [rawQuestions]);
+  const questions = benchmark ? benchmark.questions : typedQuestions;
+
+  async function loadBenchmark() {
+    setLoadingBenchmark(true);
+    setError(null);
+    try {
+      const data = await fetchJSON("/api/eval/benchmark");
+      setBenchmark(data);
+      setDatasetName(data.dataset_name);
+      setRawQuestions(
+        data.questions.map((q) => `${q.question} | ${q.ground_truth ?? ""}`).join("\n"),
+      );
+    } catch (err) {
+      setError(err.message || "Could not load the benchmark.");
+    } finally {
+      setLoadingBenchmark(false);
+    }
+  }
   const canRun =
     !running &&
     questions.length > 0 &&
@@ -473,15 +587,31 @@ function RunEvaluationPanel({ onCompleted }) {
             </label>
             <textarea
               value={rawQuestions}
-              onChange={(e) => setRawQuestions(e.target.value)}
+              onChange={(e) => {
+                setBenchmark(null);
+                setRawQuestions(e.target.value);
+              }}
               disabled={running}
               rows={5}
               placeholder={"What was Q3 revenue? | It grew 12%\nWho signed the agreement?"}
               className="w-full rounded border border-[#2A3B36] bg-[#0F1614] px-3 py-2 font-mono text-[12px] text-[#E8EDE9] outline-none focus:border-[#6FB1E0] disabled:opacity-50"
             />
-            <p className="mt-1 text-[11px] text-[#5F726B]">
-              {questions.length} question{questions.length === 1 ? "" : "s"} parsed
-            </p>
+            <div className="mt-1 flex flex-wrap items-center justify-between gap-2">
+              <p className="text-[11px] text-[#5F726B]">
+                {questions.length} question{questions.length === 1 ? "" : "s"}
+                {benchmark
+                  ? ` from ${benchmark.dataset_name}, page-labelled: retrieval metrics will be computed`
+                  : " parsed; typed questions get generation metrics only"}
+              </p>
+              <button
+                type="button"
+                onClick={loadBenchmark}
+                disabled={running || loadingBenchmark}
+                className="rounded border border-[#2A3B36] px-3 py-1 text-[12px] text-[#8FA39B] hover:text-[#E8EDE9] disabled:opacity-50"
+              >
+                {loadingBenchmark ? "Loading…" : "Load shared benchmark"}
+              </button>
+            </div>
           </div>
 
           <div>
@@ -603,23 +733,34 @@ export default function EvaluationDashboard() {
     }
   }, []);
 
-  // Best-performing configuration (by overall score) drives the top summary cards.
-  const bestConfig = useMemo(() => {
-    const withScores = configs.filter((c) => c.avg_overall_score !== null && c.avg_overall_score !== undefined);
-    if (withScores.length === 0) return null;
-    return withScores.reduce((best, c) => (c.avg_overall_score > best.avg_overall_score ? c : best));
+  // Each summary card shows the best configuration for its own metric, so a
+  // card never labels one configuration's number as another's best.
+  const summaryCards = useMemo(() => {
+    const pick = (key, better) => {
+      const measured = configs.filter((c) => c[key] !== null && c[key] !== undefined);
+      return measured.length ? measured.reduce((best, c) => (better(c[key], best[key]) ? c : best)) : null;
+    };
+    const higher = (a, b) => a > b;
+    return [
+      { key: "avg_overall_score", label: "Overall (judge)", better: higher },
+      { key: "avg_faithfulness", label: "Faithfulness", better: higher },
+      { key: "avg_citation_accuracy", label: "Citation Accuracy", better: higher },
+      { key: "avg_ndcg_at_k", label: "nDCG@K", better: higher },
+      { key: "avg_mrr", label: "MRR", better: higher },
+      { key: "avg_latency_ms", label: "Fastest pipeline", better: (a, b) => a < b, latency: true },
+    ].map((card) => ({ ...card, best: pick(card.key, card.better) }));
   }, [configs]);
 
   return (
     <div className="min-h-screen bg-[#0F1614] px-6 py-8 md:px-10">
       <div className="max-w-6xl mx-auto">
         <header className="mb-8">
-          <p className="text-[13px] text-[#5F726B] mb-1">RAGOps · Generation Evaluation</p>
+          <p className="text-[13px] text-[#5F726B] mb-1">RAGOps · Evaluation</p>
           <h1 className="text-2xl text-[#E8EDE9]" style={{ fontFamily: "'Sora', 'Inter', sans-serif" }}>
             Evaluation Dashboard
           </h1>
           <p className="text-[13px] text-[#8FA39B] mt-1">
-            Faithfulness, relevance, and citation accuracy across Baseline, Dense, Hybrid, and Hybrid + Reranker.
+            Generation quality (faithfulness, relevance, citation accuracy) and retrieval quality (Recall@K, Precision@K, MRR, nDCG@K) across Baseline, Dense, Hybrid, and Hybrid + Cross-Encoder.
           </p>
         </header>
 
@@ -632,31 +773,22 @@ export default function EvaluationDashboard() {
         <RunEvaluationPanel onCompleted={loadCompare} />
 
         {/* Summary cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
-          <SummaryCard
-            label="Faithfulness"
-            value={bestConfig ? bestConfig.avg_faithfulness?.toFixed(2) ?? "—" : "—"}
-            sublabel={bestConfig ? `Best: ${CONFIG_META[bestConfig.rag_config]?.label}` : compareLoading ? "Loading…" : "No runs yet"}
-            tone={bestConfig ? scoreTone(bestConfig.avg_faithfulness) : "muted"}
-          />
-          <SummaryCard
-            label="Answer Relevance"
-            value={bestConfig ? bestConfig.avg_answer_relevance?.toFixed(2) ?? "—" : "—"}
-            sublabel={bestConfig ? `Best: ${CONFIG_META[bestConfig.rag_config]?.label}` : compareLoading ? "Loading…" : "No runs yet"}
-            tone={bestConfig ? scoreTone(bestConfig.avg_answer_relevance) : "muted"}
-          />
-          <SummaryCard
-            label="Citation Accuracy"
-            value={bestConfig ? bestConfig.avg_citation_accuracy?.toFixed(2) ?? "—" : "—"}
-            sublabel={bestConfig ? `Best: ${CONFIG_META[bestConfig.rag_config]?.label}` : compareLoading ? "Loading…" : "No runs yet"}
-            tone={bestConfig ? scoreTone(bestConfig.avg_citation_accuracy) : "muted"}
-          />
-          <SummaryCard
-            label="Avg Latency"
-            value={bestConfig ? fmtLatency(bestConfig.avg_latency_ms) : "—"}
-            sublabel={bestConfig ? `${CONFIG_META[bestConfig.rag_config]?.label}` : compareLoading ? "Loading…" : "No runs yet"}
-            tone="muted"
-          />
+        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8">
+          {summaryCards.map(({ key, label, best, latency }) => (
+            <SummaryCard
+              key={key}
+              label={label}
+              value={best ? (latency ? fmtLatency(best[key]) : best[key].toFixed(2)) : "—"}
+              sublabel={
+                best
+                  ? `Best: ${CONFIG_META[best.rag_config]?.label || best.rag_config_label}`
+                  : compareLoading
+                    ? "Loading…"
+                    : "No runs yet"
+              }
+              tone={best && !latency ? scoreTone(best[key]) : "muted"}
+            />
+          ))}
         </div>
 
         {/* Comparison table + chart */}
@@ -678,7 +810,18 @@ export default function EvaluationDashboard() {
           ) : (
             <div className="space-y-4">
               <ComparisonTable configs={configs} onSelectRun={handleSelectRun} selectedRunId={selectedRunId} />
-              <MetricBarChart configs={configs} />
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                <MetricBarChart
+                  configs={configs}
+                  metrics={METRIC_META}
+                  title="Generation quality (LLM judge)"
+                />
+                <MetricBarChart
+                  configs={configs}
+                  metrics={RETRIEVAL_META}
+                  title="Retrieval quality against page labels"
+                />
+              </div>
             </div>
           )}
         </div>
