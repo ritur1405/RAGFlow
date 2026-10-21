@@ -1,18 +1,15 @@
-import io
 import os
 import time
 from typing import Generator
 
 from google import genai
 from google.genai import types
-from pypdf import PdfReader
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.config import GEMINI_RETRY_ATTEMPTS
 from app.models import Document
 from app.quota import with_quota_retry
-from app.utils import chunk_text
 
 # Initialize Gemini Client (automatically reads GEMINI_API_KEY from environment).
 #
@@ -244,35 +241,17 @@ Answer:"""
 
 
 def process_pdf(file_contents: bytes) -> list[dict]:
-    """Extracts text from raw PDF bytes, chunks it in batch, generates embeddings, and returns dictionaries."""
-    reader = PdfReader(io.BytesIO(file_contents))
-    pending_chunks: list[dict] = []
-    chunk_global_index = 0
+    """Runs the ingestion pipeline for an uploaded PDF: extract, clean, chunk, embed.
 
-    for page_idx, page in enumerate(reader.pages):
-        text_content = page.extract_text()
-        if not text_content or not text_content.strip():
-            continue
+    Delegates to app.ingestion.process_pdf_document so uploads get the text
+    cleaning step (hyphenation rejoined, soft line wraps and whitespace
+    normalised) before chunking. Each dict also carries the chunk text under
+    "text", the key the upload endpoint stores.
 
-        page_chunks = chunk_text(text_content, chunk_size=500, chunk_overlap=50)
+    Raises ValueError for an unreadable, empty or image-only PDF.
+    """
+    # Imported here because app.ingestion imports this module.
+    from app.ingestion import process_pdf_document
 
-        for chunk_str in page_chunks:
-            pending_chunks.append({
-                "text": chunk_str,
-                "page_number": page_idx + 1,
-                "chunk_index": chunk_global_index,
-            })
-            chunk_global_index += 1
-
-    if not pending_chunks:
-        return []
-
-    texts_in_batch = [item["text"] for item in pending_chunks]
-    embeddings = generate_embeddings_batch(texts_in_batch, task_type="RETRIEVAL_DOCUMENT")
-
-    chunks_data: list[dict] = []
-    for item, embedding in zip(pending_chunks, embeddings):
-        chunks_data.append({**item, "embedding": embedding})
-
-    return chunks_data
+    return [{**chunk, "text": chunk["content"]} for chunk in process_pdf_document(file_contents)]
 

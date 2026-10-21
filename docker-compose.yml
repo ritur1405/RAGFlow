@@ -46,6 +46,8 @@ services:
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
       RAG_TOP_K: ${RAG_TOP_K:-5}
       RAG_MAX_DISTANCE: ${RAG_MAX_DISTANCE:-0.8}
+      # Attempts per Gemini call on rate limits/5xx (free-tier keys need these).
+      GEMINI_RETRY_ATTEMPTS: ${GEMINI_RETRY_ATTEMPTS:-8}
     depends_on:
       db:
         condition: service_healthy
