@@ -6,6 +6,7 @@ from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from google.genai import errors as genai_errors
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.database import Base, add_missing_columns, engine, get_db
@@ -25,6 +26,7 @@ from app.utils import chunk_text
 from app.schemas import (
     DocumentCreate,
     DocumentChunkOut,
+    DocumentFileOut,
     IngestionResponse,
     QueryRequest,
     QueryResponse,
@@ -229,9 +231,55 @@ def list_documents(db: Session = Depends(get_db)):
             content=d.content,
             chunk_index=getattr(d, "chunk_index", None),
             page_number=getattr(d, "page_number", None),
+            file_name=getattr(d, "file_name", None),
         )
         for d in docs
     ]
+
+
+@app.get("/documents/files", response_model=list[DocumentFileOut])
+def list_document_files(db: Session = Depends(get_db)):
+    """One row per ingested file, for the document library.
+
+    Text ingested through POST /documents/ has no file name and is grouped
+    under its title instead.
+    """
+    name = func.coalesce(Document.file_name, Document.title)
+    rows = db.execute(
+        select(
+            name.label("name"),
+            (Document.file_name.is_not(None)).label("is_file"),
+            func.count(Document.id).label("chunks"),
+            func.count(func.distinct(Document.page_number)).label("pages"),
+            func.min(Document.id).label("first_chunk_id"),
+        )
+        .group_by(name, Document.file_name.is_not(None))
+        .order_by(func.min(Document.id).desc())
+    ).all()
+    return [
+        DocumentFileOut(
+            file_name=row.name,
+            is_file=bool(row.is_file),
+            chunks=row.chunks,
+            pages=row.pages,
+            first_chunk_id=row.first_chunk_id,
+        )
+        for row in rows
+    ]
+
+
+@app.delete("/documents/by-file/{file_name}")
+def delete_document_file(file_name: str, db: Session = Depends(get_db)):
+    """Deletes every chunk of one uploaded file."""
+    deleted = (
+        db.query(Document)
+        .filter(Document.file_name == file_name)
+        .delete(synchronize_session=False)
+    )
+    if not deleted:
+        raise HTTPException(status_code=404, detail=f"No chunks found for file '{file_name}'.")
+    db.commit()
+    return {"message": f"Deleted {deleted} chunk(s) of '{file_name}'.", "deleted": deleted}
 
 
 @app.delete("/documents/{doc_id}")

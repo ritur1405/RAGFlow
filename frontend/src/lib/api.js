@@ -18,6 +18,13 @@ export async function readError(res) {
   } catch {
     /* not JSON; fall through to the raw body */
   }
+  // An HTML body is the proxy's own error page (nginx or vite), not the API.
+  if (body.trimStart().startsWith("<")) {
+    const gateway = [502, 503, 504].includes(res.status);
+    return `${res.status} ${res.statusText || "Error"}${
+      gateway ? ": the backend is not reachable. It may still be starting; retry in a few seconds." : ""
+    }`;
+  }
   return `${res.status} ${res.statusText}${body ? `: ${body}` : ""}`;
 }
 
