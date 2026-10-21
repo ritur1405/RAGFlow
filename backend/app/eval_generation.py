@@ -12,14 +12,21 @@ Every score is normalized to [0.0, 1.0] and carries short step-by-step
 reasoning so a result can be audited in the dashboard rather than taken on
 trust.
 
+One judge call per answer. All four metrics are scored by a single prompt
+with a rubric per metric, so judging a benchmark answer costs one request
+instead of four. On the Gemini free tier, where daily requests are capped per
+model, that is the difference between the benchmark fitting in one day or
+not. A deterministic check still caps citation accuracy when the answer cites
+a chunk that was never retrieved, regardless of the judge's score.
+
+The judge runs on its own model (GEMINI_JUDGE_MODEL, default gemma-4-31b-it):
+a different model family from the answer generator, so the judge is not
+grading its own model's style, and a separate per-model free-tier quota.
+
 Failure policy: this module never invents a score. If the judge cannot run --
 no API key, SDK missing, or the call fails after retries -- it raises. A run
 that could not be judged is recorded as failed, not as a run that happened to
 score well. See JudgeUnavailableError and JudgeCallError.
-
-Environment variables:
-    GEMINI_API_KEY      - required (already required by app.services).
-    GEMINI_JUDGE_MODEL  - optional. Defaults to app.config.LLM_MODEL.
 """
 
 from __future__ import annotations
@@ -27,7 +34,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 import time
 from dataclasses import dataclass, field
@@ -36,7 +42,7 @@ from typing import Any, Optional
 from google.genai import errors as genai_errors
 from google.genai import types
 
-from app.config import LLM_MODEL
+from app.config import JUDGE_MODEL
 from app.quota import is_daily_quota
 
 # Reuse the single client initialised in services.py rather than creating a
@@ -45,12 +51,15 @@ from app.services import client as _client
 
 logger = logging.getLogger("ragops.eval_generation")
 
-# The judge may deliberately differ from the answer-generation model.
-GEMINI_JUDGE_MODEL = os.environ.get("GEMINI_JUDGE_MODEL", LLM_MODEL)
+# Kept under this name for callers and logs that already refer to it.
+GEMINI_JUDGE_MODEL = JUDGE_MODEL
 
-# Retry policy for transient Gemini errors (rate limits, 5xx, timeouts).
+# Retries for malformed or failed judge responses. Rate limits and transient
+# server errors are already retried inside the shared client (app/services.py).
 _MAX_RETRIES = 3
 _RETRY_BACKOFF_SECONDS = 1.5
+
+METRICS = ("faithfulness", "answer_relevance", "context_relevance", "citation_accuracy")
 
 
 # --------------------------------------------------------------------------- #
@@ -90,7 +99,7 @@ class ContextChunk:
 
 @dataclass
 class JudgeScore:
-    """Normalized output of a single LLM-as-a-judge metric call."""
+    """Normalized output of one judge metric."""
 
     metric: str
     score: float                  # normalized 0.0 - 1.0
@@ -131,16 +140,27 @@ def _score_to_dict(s: JudgeScore) -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Core Gemini call helper
+# Parsing helpers
 # --------------------------------------------------------------------------- #
 
 
 def _extract_json(raw_text: str) -> dict:
-    """Strips markdown code fences and parses raw JSON response."""
+    """Parses the judge's JSON, tolerating code fences or prose around it.
+
+    Models without a JSON response mode (e.g. Gemma) sometimes wrap the object
+    in ```json fences or add a sentence before it, so the outermost {...} is
+    parsed when the whole text is not valid JSON.
+    """
     cleaned = raw_text.strip()
     cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned)
     cleaned = re.sub(r"\s*```$", "", cleaned)
-    return json.loads(cleaned)
+    try:
+        return json.loads(cleaned)
+    except json.JSONDecodeError:
+        start, end = cleaned.find("{"), cleaned.rfind("}")
+        if start == -1 or end <= start:
+            raise
+        return json.loads(cleaned[start : end + 1])
 
 
 def _clamp01(value: Any) -> float:
@@ -156,295 +176,12 @@ def judge_available() -> bool:
     return _client is not None
 
 
-async def _call_gemini_judge(
-    system_instruction: str,
-    user_prompt: str,
-    metric_name: str,
-) -> JudgeScore:
-    """Shared execution path for judge metrics.
-
-    Runs the blocking SDK call in a worker thread and retries transient
-    failures. Raises rather than returning a placeholder score: a metric that
-    could not be measured must not look like a metric that scored well.
-    """
-    if _client is None:
-        raise JudgeUnavailableError(
-            "Gemini judge is not configured (no client). Set GEMINI_API_KEY to "
-            "run evaluations."
-        )
-
-    start = time.perf_counter()
-    last_error: Optional[Exception] = None
-
-    config = types.GenerateContentConfig(
-        system_instruction=system_instruction,
-        temperature=0.0,
-        top_p=1.0,
-        max_output_tokens=1024,
-        response_mime_type="application/json",
-    )
-
-    for attempt in range(1, _MAX_RETRIES + 1):
-        try:
-            response = await asyncio.to_thread(
-                _client.models.generate_content,
-                model=GEMINI_JUDGE_MODEL,
-                contents=user_prompt,
-                config=config,
-            )
-            elapsed_ms = (time.perf_counter() - start) * 1000
-
-            parsed = _extract_json(response.text)
-            score = _clamp01(parsed.get("score"))
-            reasoning = (
-                str(parsed.get("reasoning", "")).strip()
-                or "No reasoning provided by judge."
-            )
-
-            return JudgeScore(
-                metric=metric_name,
-                score=score,
-                reasoning=reasoning,
-                raw_response=parsed,
-                latency_ms=elapsed_ms,
-            )
-        except Exception as exc:  # noqa: BLE001 - retried, then re-raised below
-            if isinstance(exc, genai_errors.APIError) and is_daily_quota(exc):
-                # Retrying cannot succeed until the quota resets.
-                raise JudgeUnavailableError(
-                    f"Gemini daily quota exhausted for the judge model: {exc.message}"
-                ) from exc
-            last_error = exc
-            logger.warning(
-                "Judge call failed (metric=%s, attempt=%d/%d): %s",
-                metric_name, attempt, _MAX_RETRIES, exc,
-            )
-            if attempt < _MAX_RETRIES:
-                await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
-
-    logger.exception(
-        "Judge call for metric=%s failed after %d attempts", metric_name, _MAX_RETRIES,
-        exc_info=last_error,
-    )
-    raise JudgeCallError(
-        f"Judge metric '{metric_name}' failed after {_MAX_RETRIES} attempts: {last_error}"
-    ) from last_error
-
-
 def _format_context(context_chunks: list[ContextChunk]) -> str:
     if not context_chunks:
         return "(no context chunks were retrieved)"
     return "\n\n".join(
         f"[chunk_id: {c.chunk_id}]\n{c.text.strip()}" for c in context_chunks
     )
-
-
-# --------------------------------------------------------------------------- #
-# Metric (a): Faithfulness
-# --------------------------------------------------------------------------- #
-
-_FAITHFULNESS_SYSTEM = """You are a strict factual-consistency judge for a Retrieval-Augmented \
-Generation (RAG) system. You determine whether a generated answer is fully grounded in the \
-provided context, with zero hallucinated or unsupported claims.
-
-Score guidance:
-- 1.0: every factual claim in the answer is directly supported by the context.
-- 0.5-0.9: mostly supported, with minor unsupported details or slight overreach.
-- 0.1-0.4: several claims are not supported by the context.
-- 0.0: the answer is substantially fabricated or contradicts the context.
-
-Respond ONLY with a JSON object of the exact shape:
-{"score": <float 0.0-1.0>, "reasoning": "<3-5 short numbered steps of your reasoning>"}
-"""
-
-_FAITHFULNESS_TEMPLATE = """QUERY:
-{query}
-
-RETRIEVED CONTEXT:
-{context}
-
-GENERATED ANSWER:
-{answer}
-
-Step-by-step task:
-1. Break the answer into its individual factual claims.
-2. For each claim, check whether it is explicitly or reasonably entailed by the context.
-3. Flag any claim that is unsupported, exaggerated, or contradicts the context.
-4. Compute a faithfulness score reflecting the fraction of claims that are properly grounded.
-Return the JSON object described in your instructions."""
-
-
-async def evaluate_faithfulness(
-    query: str, answer: str, context_chunks: list[ContextChunk]
-) -> JudgeScore:
-    """Checks whether `answer` is strictly grounded in `context_chunks`."""
-    prompt = _FAITHFULNESS_TEMPLATE.format(
-        query=query, context=_format_context(context_chunks), answer=answer
-    )
-    return await _call_gemini_judge(_FAITHFULNESS_SYSTEM, prompt, "faithfulness")
-
-
-# --------------------------------------------------------------------------- #
-# Metric (b): Answer Relevance
-# --------------------------------------------------------------------------- #
-
-_ANSWER_RELEVANCE_SYSTEM = """You are a judge evaluating whether a generated answer directly and \
-completely addresses the user's query. You do NOT check factual correctness against context here \
-- only whether the answer is on-topic, complete, and avoids padding, evasion, or answering a \
-different question than the one asked.
-
-Score guidance:
-- 1.0: directly and completely answers the query.
-- 0.5-0.9: answers the query but is partially incomplete, indirect, or includes irrelevant padding.
-- 0.1-0.4: only tangentially related to the query.
-- 0.0: does not address the query at all (e.g., "I don't know" with no attempt, or off-topic).
-
-Respond ONLY with a JSON object of the exact shape:
-{"score": <float 0.0-1.0>, "reasoning": "<3-5 short numbered steps of your reasoning>"}
-"""
-
-_ANSWER_RELEVANCE_TEMPLATE = """QUERY:
-{query}
-
-GENERATED ANSWER:
-{answer}
-
-Step-by-step task:
-1. Identify the core information need expressed in the query.
-2. Check whether the answer directly targets that need.
-3. Note any irrelevant, evasive, or off-topic content in the answer.
-4. Compute a relevance score for how directly and completely the answer addresses the query.
-Return the JSON object described in your instructions."""
-
-
-async def evaluate_answer_relevance(query: str, answer: str) -> JudgeScore:
-    """Checks if the answer addresses the query, independent of context grounding."""
-    prompt = _ANSWER_RELEVANCE_TEMPLATE.format(query=query, answer=answer)
-    return await _call_gemini_judge(
-        _ANSWER_RELEVANCE_SYSTEM, prompt, "answer_relevance"
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Metric (c): Context Relevance
-# --------------------------------------------------------------------------- #
-
-_CONTEXT_RELEVANCE_SYSTEM = """You are a judge evaluating retrieval quality for a RAG pipeline. \
-Given a query and the chunks retrieved for it, determine what fraction of the retrieved context \
-is actually useful/relevant to answering the query versus noise (off-topic, redundant, or \
-tangential chunks).
-
-Score guidance:
-- 1.0: nearly all retrieved content is relevant and useful for answering the query.
-- 0.5-0.9: a majority of the content is relevant, with some noisy or redundant chunks.
-- 0.1-0.4: mostly noise, with only a small relevant portion.
-- 0.0: none of the retrieved context is relevant to the query.
-
-Respond ONLY with a JSON object of the exact shape:
-{"score": <float 0.0-1.0>, "reasoning": "<3-5 short numbered steps of your reasoning>"}
-"""
-
-_CONTEXT_RELEVANCE_TEMPLATE = """QUERY:
-{query}
-
-RETRIEVED CONTEXT CHUNKS:
-{context}
-
-Step-by-step task:
-1. For each chunk, judge whether it contains information useful for answering the query.
-2. Count how many chunks are relevant vs. noise (off-topic/redundant).
-3. Consider whether noisy chunks are likely to distract or mislead the generator.
-4. Compute a context relevance score approximating the useful-to-noise ratio.
-Return the JSON object described in your instructions."""
-
-
-async def evaluate_context_relevance(
-    query: str, context_chunks: list[ContextChunk]
-) -> JudgeScore:
-    """Evaluates the quality/noise ratio of the retrieved context for the query."""
-    prompt = _CONTEXT_RELEVANCE_TEMPLATE.format(
-        query=query, context=_format_context(context_chunks)
-    )
-    return await _call_gemini_judge(
-        _CONTEXT_RELEVANCE_SYSTEM, prompt, "context_relevance"
-    )
-
-
-# --------------------------------------------------------------------------- #
-# Metric (d): Citation Accuracy
-# --------------------------------------------------------------------------- #
-
-_CITATION_ACCURACY_SYSTEM = """You are a citation-auditing judge for a RAG system. The generated \
-answer contains inline citations referencing chunk IDs (e.g. "[chunk_3]" or similar markers). You \
-must verify that each cited chunk ID actually contains text that supports the specific claim it \
-was attached to, and that no claim requiring support is left uncited.
-
-Score guidance:
-- 1.0: every citation correctly supports its associated claim, and no supportable claim is missing a citation.
-- 0.5-0.9: most citations are accurate; minor mismatches or a small number of missing citations.
-- 0.1-0.4: many citations point to chunks that do not support the claim, or citations are largely missing.
-- 0.0: citations are absent, fabricated (referencing chunk IDs that don't exist), or systematically wrong.
-
-Respond ONLY with a JSON object of the exact shape:
-{"score": <float 0.0-1.0>, "reasoning": "<3-5 short numbered steps of your reasoning>", \
-"mismatched_citations": [{"cited_chunk_id": "<id>", "claim": "<claim text>", "issue": "<why it does not match>"}]}
-"""
-
-_CITATION_ACCURACY_TEMPLATE = """QUERY:
-{query}
-
-RETRIEVED CONTEXT CHUNKS (with chunk IDs):
-{context}
-
-GENERATED ANSWER (with inline citations):
-{answer}
-
-CITED CHUNK IDS EXTRACTED FROM THE ANSWER:
-{cited_ids}
-
-Step-by-step task:
-1. For each citation in the answer, locate the chunk with the matching chunk_id in the context.
-2. Verify the cited chunk's text actually supports the specific claim next to that citation.
-3. Check whether every claim that requires support (specific facts, numbers, named entities) has a citation.
-4. Flag fabricated chunk IDs (cited but not present in context) as maximum-severity errors.
-5. Compute a citation accuracy score reflecting the fraction of correct, well-supported citations.
-Return the JSON object described in your instructions, including the mismatched_citations list \
-(empty array if none)."""
-
-
-async def evaluate_citation_accuracy(
-    answer: str,
-    context_chunks: list[ContextChunk],
-    cited_chunk_ids: Optional[list[str]] = None,
-    query: str = "",
-) -> JudgeScore:
-    """Verifies that cited chunk IDs in `answer` actually support the context text."""
-    if cited_chunk_ids is None:
-        cited_chunk_ids = extract_citation_ids(answer)
-
-    prompt = _CITATION_ACCURACY_TEMPLATE.format(
-        query=query,
-        context=_format_context(context_chunks),
-        answer=answer,
-        cited_ids=", ".join(cited_chunk_ids) if cited_chunk_ids else "(none found)",
-    )
-
-    score = await _call_gemini_judge(
-        _CITATION_ACCURACY_SYSTEM, prompt, "citation_accuracy"
-    )
-
-    # Deterministic guardrail: a citation pointing at a chunk that was never
-    # retrieved is a hard error regardless of how the judge scored it.
-    valid_ids = {c.chunk_id for c in context_chunks}
-    fabricated = [cid for cid in cited_chunk_ids if cid not in valid_ids]
-    if fabricated:
-        score.score = min(score.score, 0.2)
-        score.reasoning += (
-            f" [Deterministic check] Fabricated chunk ID(s) not present in retrieved "
-            f"context: {fabricated}. Score capped at 0.2."
-        )
-
-    return score
 
 
 def extract_citation_ids(answer: str) -> list[str]:
@@ -466,6 +203,134 @@ def extract_citation_ids(answer: str) -> list[str]:
 
 
 # --------------------------------------------------------------------------- #
+# The judge prompt: four rubrics, one call
+# --------------------------------------------------------------------------- #
+
+_JUDGE_INSTRUCTIONS = """You are a strict, impartial evaluator for a Retrieval-Augmented \
+Generation (RAG) system. Score one generated answer on four independent metrics, each from \
+0.0 to 1.0. Judge each metric on its own rubric; do not let one metric influence another.
+
+1. faithfulness: is every factual claim in the answer supported by the RETRIEVED CONTEXT?
+   Break the answer into claims and check each against the context. Outside knowledge does
+   not count as support, even if true.
+   1.0 all claims supported | 0.5-0.9 minor unsupported details | 0.1-0.4 several unsupported
+   claims | 0.0 substantially fabricated or contradicts the context.
+   A refusal that states the context does not contain the answer makes no claims: score 1.0.
+
+2. answer_relevance: does the answer directly and completely address the QUERY?
+   Ignore correctness here; judge only whether it answers the question that was asked.
+   1.0 direct and complete | 0.5-0.9 partial, indirect or padded | 0.1-0.4 tangential |
+   0.0 does not address the query (including a refusal).
+
+3. context_relevance: how much of the RETRIEVED CONTEXT is useful for answering the QUERY?
+   Judge each chunk as useful or noise.
+   1.0 nearly all useful | 0.5-0.9 mostly useful | 0.1-0.4 mostly noise | 0.0 none useful.
+
+4. citation_accuracy: the answer cites chunks inline as [chunk_id]. Does each cited chunk
+   support the claim it is attached to, and is every claim that needs support cited?
+   1.0 all citations correct and complete | 0.5-0.9 minor mismatches or omissions |
+   0.1-0.4 many wrong or missing | 0.0 absent, fabricated or systematically wrong.
+   A refusal with no claims and no citations: score 1.0.
+
+Respond with ONLY a JSON object of exactly this shape, and nothing else:
+{"faithfulness": {"score": <float>, "reasoning": "<2-4 short numbered steps>"},
+ "answer_relevance": {"score": <float>, "reasoning": "<...>"},
+ "context_relevance": {"score": <float>, "reasoning": "<...>"},
+ "citation_accuracy": {"score": <float>, "reasoning": "<...>"}}"""
+
+_JUDGE_TEMPLATE = """QUERY:
+{query}
+
+RETRIEVED CONTEXT (with chunk IDs):
+{context}
+
+GENERATED ANSWER:
+{answer}
+
+CITED CHUNK IDS EXTRACTED FROM THE ANSWER:
+{cited_ids}"""
+
+
+def _supports_system_and_json(model: str) -> bool:
+    """Gemma models on the Gemini API reject system instructions and JSON mode."""
+    return not model.lower().startswith("gemma")
+
+
+def _judge_request(prompt: str) -> tuple[str, types.GenerateContentConfig]:
+    if _supports_system_and_json(GEMINI_JUDGE_MODEL):
+        return prompt, types.GenerateContentConfig(
+            system_instruction=_JUDGE_INSTRUCTIONS,
+            temperature=0.0,
+            max_output_tokens=2048,
+            response_mime_type="application/json",
+        )
+    # Instructions travel in the prompt itself; _extract_json copes with any
+    # fences or prose the model adds around the JSON.
+    return f"{_JUDGE_INSTRUCTIONS}\n\n{prompt}", types.GenerateContentConfig(
+        temperature=0.0, max_output_tokens=2048
+    )
+
+
+def _parse_scores(parsed: dict) -> dict[str, tuple[float, str]]:
+    """Validates that all four metrics are present. Raises ValueError otherwise."""
+    scores = {}
+    for metric in METRICS:
+        entry = parsed.get(metric)
+        if not isinstance(entry, dict) or "score" not in entry:
+            raise ValueError(f"judge response is missing metric '{metric}'")
+        reasoning = str(entry.get("reasoning", "")).strip() or "No reasoning provided by judge."
+        scores[metric] = (_clamp01(entry["score"]), reasoning)
+    return scores
+
+
+async def _call_judge(prompt: str) -> tuple[dict[str, tuple[float, str]], dict, float]:
+    """Runs the single judge call, retrying malformed or failed responses.
+
+    Raises rather than returning a placeholder score: a metric that could not
+    be measured must not look like a metric that scored well.
+    """
+    if _client is None:
+        raise JudgeUnavailableError(
+            "Gemini judge is not configured (no client). Set GEMINI_API_KEY to "
+            "run evaluations."
+        )
+
+    contents, config = _judge_request(prompt)
+    start = time.perf_counter()
+    last_error: Optional[Exception] = None
+
+    for attempt in range(1, _MAX_RETRIES + 1):
+        try:
+            response = await asyncio.to_thread(
+                _client.models.generate_content,
+                model=GEMINI_JUDGE_MODEL,
+                contents=contents,
+                config=config,
+            )
+            parsed = _extract_json(response.text or "")
+            scores = _parse_scores(parsed)
+            return scores, parsed, (time.perf_counter() - start) * 1000
+        except Exception as exc:  # noqa: BLE001 - retried, then re-raised below
+            if isinstance(exc, genai_errors.APIError) and is_daily_quota(exc):
+                # Retrying cannot succeed until the quota resets.
+                raise JudgeUnavailableError(
+                    f"Gemini daily quota exhausted for the judge model "
+                    f"({GEMINI_JUDGE_MODEL}): {exc.message}"
+                ) from exc
+            last_error = exc
+            logger.warning(
+                "Judge call failed (attempt %d/%d): %s", attempt, _MAX_RETRIES, exc
+            )
+            if attempt < _MAX_RETRIES:
+                await asyncio.sleep(_RETRY_BACKOFF_SECONDS * attempt)
+
+    logger.error("Judge call failed after %d attempts", _MAX_RETRIES, exc_info=last_error)
+    raise JudgeCallError(
+        f"Judge failed after {_MAX_RETRIES} attempts: {last_error}"
+    ) from last_error
+
+
+# --------------------------------------------------------------------------- #
 # Orchestrator
 # --------------------------------------------------------------------------- #
 
@@ -483,39 +348,48 @@ async def run_generation_eval(
     context_chunks: list[ContextChunk],
     cited_chunk_ids: Optional[list[str]] = None,
 ) -> GenerationEvalResult:
-    """Runs all four judge metrics concurrently for a single generation sample.
+    """Scores one generated answer on all four metrics with a single judge call.
 
-    Raises JudgeUnavailableError / JudgeCallError if any metric cannot be
-    measured. Partial results are not returned.
+    Raises JudgeUnavailableError / JudgeCallError if the judge cannot produce
+    all four scores. Partial results are not returned.
     """
-    start = time.perf_counter()
+    if cited_chunk_ids is None:
+        cited_chunk_ids = extract_citation_ids(answer)
 
-    (
-        faithfulness,
-        answer_relevance,
-        context_relevance,
-        citation_accuracy,
-    ) = await asyncio.gather(
-        evaluate_faithfulness(query, answer, context_chunks),
-        evaluate_answer_relevance(query, answer),
-        evaluate_context_relevance(query, context_chunks),
-        evaluate_citation_accuracy(answer, context_chunks, cited_chunk_ids, query=query),
+    prompt = _JUDGE_TEMPLATE.format(
+        query=query,
+        context=_format_context(context_chunks),
+        answer=answer,
+        cited_ids=", ".join(cited_chunk_ids) if cited_chunk_ids else "(none found)",
     )
+    scores, raw, latency_ms = await _call_judge(prompt)
 
-    total_latency_ms = (time.perf_counter() - start) * 1000
+    results = {
+        metric: JudgeScore(
+            metric=metric, score=score, reasoning=reasoning, raw_response=raw, latency_ms=latency_ms
+        )
+        for metric, (score, reasoning) in scores.items()
+    }
 
-    overall = (
-        faithfulness.score * _METRIC_WEIGHTS["faithfulness"]
-        + answer_relevance.score * _METRIC_WEIGHTS["answer_relevance"]
-        + context_relevance.score * _METRIC_WEIGHTS["context_relevance"]
-        + citation_accuracy.score * _METRIC_WEIGHTS["citation_accuracy"]
-    )
+    # Deterministic guardrail: a citation pointing at a chunk that was never
+    # retrieved is a hard error regardless of how the judge scored it.
+    valid_ids = {c.chunk_id for c in context_chunks}
+    fabricated = [cid for cid in cited_chunk_ids if cid not in valid_ids]
+    if fabricated:
+        citation = results["citation_accuracy"]
+        citation.score = min(citation.score, 0.2)
+        citation.reasoning += (
+            f" [Deterministic check] Fabricated chunk ID(s) not present in retrieved "
+            f"context: {fabricated}. Score capped at 0.2."
+        )
+
+    overall = sum(results[m].score * _METRIC_WEIGHTS[m] for m in METRICS)
 
     return GenerationEvalResult(
-        faithfulness=faithfulness,
-        answer_relevance=answer_relevance,
-        context_relevance=context_relevance,
-        citation_accuracy=citation_accuracy,
+        faithfulness=results["faithfulness"],
+        answer_relevance=results["answer_relevance"],
+        context_relevance=results["context_relevance"],
+        citation_accuracy=results["citation_accuracy"],
         overall_score=overall,
-        total_latency_ms=total_latency_ms,
+        total_latency_ms=latency_ms,
     )

@@ -80,5 +80,43 @@ def test_judge_reports_a_daily_quota_as_unavailable_without_retrying():
     client.models.generate_content.side_effect = _429(DAILY)
     with patch.object(eg, "_client", client):
         with pytest.raises(eg.JudgeUnavailableError, match="daily quota"):
-            asyncio.run(eg._call_gemini_judge("sys", "prompt", "faithfulness"))
+            asyncio.run(eg.run_generation_eval("Q?", "A", [eg.ContextChunk("1", "t")]))
     assert client.models.generate_content.call_count == 1
+
+
+def test_find_rate_limit_follows_wrapped_causes():
+    limit = _429(DAILY)
+    try:
+        try:
+            raise limit
+        except genai_errors.ClientError as inner:
+            raise RuntimeError("LLM generation failed") from inner
+    except RuntimeError as outer:
+        assert quota.find_rate_limit(outer) is limit
+    assert quota.find_rate_limit(RuntimeError("unrelated")) is None
+
+
+def test_rate_limit_messages_name_the_model_and_the_kind_of_limit():
+    daily = genai_errors.ClientError(429, {"error": {
+        "code": 429, "status": "RESOURCE_EXHAUSTED",
+        "message": "Quota exceeded for metric: x, limit: 500, model: gemini-3.5-flash-lite",
+        "details": [{"violations": [{"quotaId": DAILY}]}]}})
+    assert "daily request limit for gemini-3.5-flash-lite" in quota.rate_limit_message(daily)
+    assert "Try again in a minute" in quota.rate_limit_message(_429())
+
+
+def test_query_endpoint_reports_a_quota_as_503():
+    from fastapi.testclient import TestClient
+
+    from app.database import get_db
+    from app.main import app
+
+    app.dependency_overrides[get_db] = lambda: MagicMock()
+    try:
+        with patch("app.main.query_rag", side_effect=_429(DAILY)), TestClient(app) as client:
+            resp = client.post("/query/", json={"question": "What is BM25?"})
+    finally:
+        app.dependency_overrides.clear()
+
+    assert resp.status_code == 503
+    assert "daily request limit" in resp.json()["detail"]
