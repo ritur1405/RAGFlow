@@ -1,230 +1,312 @@
 # RAGOps
 
-## 2-Person Resume-Level Project Plan
+A RAG experimentation and evaluation platform. Upload documents, ask grounded
+questions with citations, and **measure** how much each retrieval strategy
+actually helps: Baseline → Dense → Hybrid (Dense + BM25) → Hybrid + Cross-Encoder
+reranker, compared on one shared, page-labelled benchmark with retrieval
+metrics (Recall@K, Precision@K, MRR, nDCG@K) and LLM-judged generation metrics
+(faithfulness, answer/context relevance, citation accuracy), plus latency.
 
-**Goal:** Build a focused RAG experimentation and evaluation platform that is strong enough for a resume and technical interviews, without turning the project into a startup-scale platform.
+The project plan this implements is in [docs/RAGOps_2_Person_Project_Plan.pdf](docs/RAGOps_2_Person_Project_Plan.pdf).
 
-## 1. Project Objective
+- [Architecture](#architecture)
+- [Quickstart](#quickstart)
+- [Using it](#using-it)
+- [Benchmark results](#benchmark-results)
+- [How it works](#how-it-works)
+- [API](#api)
+- [Configuration](#configuration)
+- [Development](#development)
+- [Plan coverage](#plan-coverage)
+- [Limitations](#limitations)
 
-RAGOps will allow users to upload documents, build a searchable knowledge base, ask questions, and compare different RAG retrieval configurations. The main differentiator is measurable comparison of retrieval quality rather than simply building another PDF chatbot.
+## Architecture
 
-**Core comparison:** Baseline RAG → Dense Retrieval → Hybrid Retrieval → Hybrid + Reranker
+```mermaid
+flowchart LR
+    UI["React + Vite<br/>Documents · Ask · Experiments · Evaluation"] -->|nginx / vite proxy| API[FastAPI]
+    API --> ING["Ingestion<br/>extract → clean → chunk → embed"]
+    ING --> DB[("PostgreSQL + pgvector<br/>chunks · experiment runs · eval runs")]
+    API --> RET{"Retrievers"}
+    RET --> D["Dense<br/>pgvector L2"]
+    RET --> B["BM25<br/>rank-bm25"]
+    D & B --> H["Hybrid<br/>Reciprocal Rank Fusion"]
+    H --> CE["Cross-encoder rerank<br/>ms-marco-MiniLM (ONNX)"]
+    D & H & CE --> GEN["Gemini generation<br/>grounded, cited"]
+    GEN --> EVAL["Evaluation<br/>retrieval metrics + LLM judge"]
+    D & B & H & CE --> DB
+    EVAL --> DB
+```
 
-## 2. Final MVP
+Everything is one FastAPI service, one Postgres database and one static
+frontend, as the plan asks: no microservices, no orchestration layer.
 
-| Feature | Required |
+## Quickstart
+
+Requirements: Docker, and a Gemini API key from [Google AI Studio](https://aistudio.google.com/).
+
+```bash
+cp .env.example .env          # set GEMINI_API_KEY and EVAL_API_KEY
+docker compose up --build
+```
+
+| Service | URL |
 |---|---|
-| PDF document upload | Yes |
-| Text extraction + cleaning | Yes |
-| Chunking | Yes |
-| Embeddings | Yes |
-| PostgreSQL + pgvector | Yes |
-| Dense retrieval | Yes |
-| BM25 / keyword retrieval | Yes |
-| Hybrid retrieval | Yes |
-| Reranking | Yes |
-| LLM answer generation | Yes |
-| Citations / source chunks | Yes |
-| Retrieval + generation evaluation | Yes |
-| Experiment comparison dashboard | Yes |
-| Docker + deployment | Final stage |
+| Web app | http://localhost:5173 |
+| API + Swagger docs | http://localhost:8000/docs |
+| Postgres (pgvector) | localhost:5432 |
 
-## 3. Team Structure
+The backend image bakes in the cross-encoder model at build time, so the first
+build takes a few minutes and the containers then run offline apart from
+Gemini calls. See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for running it on a
+server.
 
-Both members work across ML/RAG and development. Each week has a lead owner, but the second member reviews and contributes to the same deliverable. This prevents the project from becoming two disconnected halves.
+## Using it
 
-| Member A — Primary Strength | Member B — Primary Strength |
-|---|---|
-| RAG and retrieval | FastAPI |
-| Embeddings | PostgreSQL + pgvector |
-| BM25 | React |
-| Hybrid retrieval | API integration |
-| Reranking | Dashboard |
-| Evaluation | Docker/deployment |
-| Experiment analysis | |
+1. **Documents** (`/library`): upload a text-based PDF. It is extracted, cleaned,
+   chunked and embedded into pgvector, keeping the file name and page number of
+   every chunk.
+2. **Ask** (`/ask`): ask a question. Dense retrieval picks the closest chunks and
+   Gemini answers only from them, citing `[Source N]` for each claim; citations
+   link to the source chunk.
+3. **Experiments** (`/experiments`): run one query through Dense, BM25, Hybrid,
+   Hybrid + Cross-Encoder and Baseline side by side. Retrieval only, so it is
+   fast and free of generation cost. Shows rankings, scores, which chunks the
+   retrievers agree on, and latency. Runs and named configurations are stored.
+4. **Evaluation** (`/evaluation`): "Load shared benchmark" and run it (needs the
+   `EVAL_API_KEY`) to score all four configurations, or browse earlier runs
+   question by question, with the judge's reasoning for every score.
 
-**Cross-training:** ~30% development contribution  
-**Cross-training:** ~30% ML/RAG contribution
+To reproduce the benchmark below: upload
+`backend/benchmarks/beir-2104.08663v4.pdf`, then
 
-## 4. Target Architecture
+```bash
+pip install -r scripts/requirements.txt
+python scripts/run_benchmark.py            # --limit 2 for a quick smoke test
+```
 
-React → FastAPI → PostgreSQL + pgvector  
-Ingestion: PDF → extraction → cleaning → chunking → embeddings  
-Retrieval: Dense / BM25 / Hybrid → optional Reranker  
-Generation: LLM + source citations  
-Evaluation: Retrieval metrics + generation metrics  
-Dashboard: Compare experiments and visualize results
+## Benchmark results
 
-## 6. Recommended Tech Stack
+The full results (tables per configuration and per question type, plus
+charts) are written to [docs/benchmarks/results.md](docs/benchmarks/results.md)
+by `scripts/run_benchmark.py`. The full run makes about 440 Gemini calls, so it
+needs a key with a paid-tier quota: the free tier allows only 20 generation
+requests per day for `gemini-3.6-flash`.
 
-| Layer | Technology | Purpose |
+How to read the numbers, and the analysis, are in [docs/REPORT.md](docs/REPORT.md#3-results).
+
+## How it works
+
+### Ingestion
+
+`POST /documents/upload/` validates the file (PDF, ≤10 MB), then
+`app/ingestion.py` runs the pipeline:
+
+1. **Extract** page by page with `pypdf`, keeping the 1-based page number.
+2. **Clean** (`app/utils.clean_text`): rejoin hyphenated line breaks, turn soft
+   wraps into spaces, collapse whitespace, keep paragraph breaks.
+3. **Chunk** each page separately into 500-character chunks with 50 characters
+   of overlap, so every chunk has exactly one page number.
+4. **Embed** in batches with `gemini-embedding-001` (768 dimensions,
+   `RETRIEVAL_DOCUMENT` task type) and store in a pgvector column.
+
+### Retrieval strategies
+
+All live in `app/rag_pipelines.py`. Each has a `retrieve_*` function (ranked
+chunks with scores, used by the experiments) and a `run_*` pipeline (retrieval
+plus cited generation, used by the benchmark).
+
+| Strategy | How | Score |
 |---|---|---|
-| Frontend | React | Upload, query and dashboard |
-| Backend | FastAPI | REST APIs and orchestration |
-| Database | PostgreSQL + pgvector | Metadata + vector storage |
-| RAG | LangChain or LlamaIndex | Pipeline integration |
-| Embeddings | One strong embedding model | Semantic representation |
-| Retrieval | Vector search + BM25 | Dense, keyword and hybrid |
-| Reranking | Cross-encoder | Improve context ordering |
-| LLM | One API/cloud LLM | Answer generation |
-| Deployment | Docker + suitable cloud | Reproducible deployment |
+| **Baseline** | Top-K pgvector L2 search, no filtering | L2 distance |
+| **Dense** | Top-8 by L2, drop chunks beyond the distance gate (0.8), keep top-K | L2 distance |
+| **BM25** | `BM25Okapi` over all chunks (experiments only) | BM25 |
+| **Hybrid** | Dense top-8 and BM25 top-8 fused with Reciprocal Rank Fusion (k=60) | RRF |
+| **Hybrid + Cross-Encoder** | Hybrid top-8 re-scored by `ms-marco-MiniLM-L-6-v2` | logit |
 
-## 7. Final Benchmark
+Why these choices:
 
-Run the same evaluation dataset through four configurations:
+- **RRF instead of a weighted score sum.** L2 distances and BM25 scores live on
+  unrelated scales, and RRF only uses ranks, so it needs no normalisation or
+  tuning.
+- **A cross-encoder for reranking.** A bi-encoder embeds the question and the
+  chunk separately. A cross-encoder reads them together, so it judges relevance
+  more precisely, but it needs one model pass per candidate. That is why it only
+  re-scores the 8-chunk hybrid pool. It runs locally through fastembed's ONNX
+  runtime, with no PyTorch, no API cost, and deterministic scores. This is the
+  setup the BEIR paper found best for zero-shot retrieval.
+- **Failure policy.** A strategy that fails raises an error and is recorded as
+  failed. It never silently falls back to another strategy, because that result
+  would be filed under the wrong label.
 
-| Configuration | Purpose |
-|---|---|
-| Baseline RAG | Reference point |
-| Dense RAG | Semantic retrieval performance |
-| Hybrid RAG | Dense + keyword retrieval |
-| Hybrid + Reranker | Best-quality retrieval candidate |
+### Generation
 
-**Metrics:** Recall@K, Precision@K, MRR/NDCG, faithfulness, answer/context relevance, citation accuracy and latency.
+The Ask page uses `app/rag_pipeline.py` (dense retrieval, `[Source N]`
+citations). The benchmark pipelines cite chunk IDs as `[chunk_id]` so citations
+can be checked mechanically. Both prompts allow answering only from the
+retrieved context, and require a fixed "cannot find" sentence when the context
+is insufficient. Generation uses `gemini-3.6-flash`.
 
-## 8. What NOT to Build
+### Evaluation
 
-- Microservices architecture
-- Kubernetes
-- Custom LLM training/fine-tuning
-- Complex authentication and role systems
-- Large-scale distributed vector infrastructure
-- Over-engineered experiment orchestration
-- Huge failure taxonomy
+`POST /api/eval/run` runs each benchmark question through each configuration,
+then measures two things:
 
-**Target:** a technically credible, measurable and deployable student project — not a startup platform.
+- **Retrieval metrics** (`app/eval_retrieval.py`) on the K=3 chunks handed to the
+  generator, against page labels. A chunk counts as relevant if it comes from a
+  labelled page of the labelled file. Labels are page numbers, not chunk IDs,
+  because chunk IDs change every time a PDF is re-uploaded.
+  - **Precision@K**: relevant chunks in the top K, divided by K.
+  - **Recall@K**: labelled pages hit, using BEIR's capped recall.
+  - **MRR**: the reciprocal rank of the first relevant chunk.
+  - **nDCG@K**: binary-gain DCG divided by the ideal DCG.
+- **Generation metrics** (`app/eval_generation.py`), scored 0–1 by a Gemini
+  LLM-as-judge at temperature 0, with written reasoning stored for every score:
+  - **Faithfulness**: is every claim supported by the context?
+  - **Answer relevance**: does the answer address the question?
+  - **Context relevance**: how much of the retrieved context is useful?
+  - **Citation accuracy**: do the cited chunks support the claims next to them?
+    A citation of a chunk that was never retrieved caps this score at 0.2,
+    regardless of what the judge said.
 
-## 9. Resume Positioning
+  The overall score is a weighted mean: faithfulness .35, citation .25, the two
+  relevance metrics .20 each.
 
-**Suggested positioning:** Built a full-stack RAG experimentation platform that ingests documents, supports dense/BM25/hybrid retrieval with reranking, evaluates retrieval and generation quality, and visualizes benchmark results through a web dashboard.
+Judge failures raise an error rather than recording a default score, so a run
+either has measured numbers or is marked failed.
 
-**Interview topics:** Why hybrid retrieval? When does reranking help? Recall@K vs MRR? How was faithfulness evaluated? What latency/quality trade-off appeared? Which configuration performed best and why?
+### Benchmark dataset
 
-## 10. Working Rules
+`backend/benchmarks/ragops_benchmark.json`: 22 questions about the BEIR paper
+(arXiv:2104.08663, CC BY-SA 4.0, included unmodified), each with a reference
+answer and the pages that answer it. The questions are a mix of three types:
 
-- Commit small, understandable changes.
-- Use GitHub issues/tasks so ownership is clear.
-- A feature is complete only after end-to-end integration and testing.
-- Both members must understand the complete RAG pipeline.
-- Use one shared evaluation dataset for comparable experiments.
-- Prioritize working functionality over UI polish.
-- If a feature does not improve learning, resume value or the final demo, cut it.
+- **Factual**: the question restates the paper's wording.
+- **Keyword**: the question hinges on exact names and numbers, where BM25
+  should help.
+- **Paraphrase**: the question shares little vocabulary with the text, where
+  dense retrieval should help.
 
-## 11. Week 3 — Dense RAG MVP (Member A)
+Every label was checked against the extracted page text. See
+[backend/benchmarks/README.md](backend/benchmarks/README.md).
 
-### Pipeline Architecture
+## API
 
-```
-User Query
-    ↓
-Query Embedding (gemini-embedding-001, RETRIEVAL_QUERY)
-    ↓
-Dense Vector Search (PostgreSQL + pgvector, L2 distance)
-    ↓
-Top-K Relevant Chunks (filtered by distance threshold)
-    ↓
-Context Construction (numbered, source-attributed)
-    ↓
-Prompt Construction (grounded QA with citation instructions)
-    ↓
-LLM Generation (gemini-3.6-flash)
-    ↓
-Answer + Source Citations
-```
+Full interactive docs at `/docs`. Summary:
 
-### Module Structure
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/documents/upload/` | Upload and index a PDF |
+| GET | `/documents/files` | One row per indexed file |
+| DELETE | `/documents/by-file/{file_name}` | Remove a file's chunks |
+| GET | `/documents/` · DELETE `/documents/{id}` | Raw chunks |
+| POST | `/query/` | Grounded answer + sources |
+| POST | `/api/experiments/compare` | Rank one query with several retrievers |
+| GET | `/api/experiments/runs` | Experiment history |
+| GET/POST/DELETE | `/api/experiments/configs` | Saved experiment configurations |
+| POST | `/api/eval/run` | Run the benchmark (requires `X-API-Key`) |
+| GET | `/api/eval/compare` | Latest completed run per configuration |
+| GET | `/api/eval/results/{run_id}` | Per-question scores and judge reasoning |
+| GET | `/api/eval/benchmark` | The shared benchmark dataset |
 
-| Module | Purpose |
-|---|---|
-| `backend/app/config.py` | Centralized RAG configuration (env-var driven) |
-| `backend/app/retrieval.py` | Dense retrieval: query → embedding → pgvector → `RetrievedChunk` |
-| `backend/app/context.py` | Context + prompt construction (pure functions) |
-| `backend/app/llm.py` | LLM generation wrapper |
-| `backend/app/rag_pipeline.py` | Orchestrator — single entry point `query_rag()` |
+## Configuration
 
-### Dense Retrieval
-
-The retrieval layer converts the user query into a 768-dimensional embedding using `gemini-embedding-001` with `task_type="RETRIEVAL_QUERY"` (matching the `RETRIEVAL_DOCUMENT` type used during ingestion). It then performs an L2 distance search on PostgreSQL using pgvector's `<->` operator.
-
-### Top-K and Distance Threshold
-
-- **Top-K** (default 5): The number of nearest chunks retrieved from pgvector. Configurable via the `RAG_TOP_K` environment variable.
-- **Distance threshold** (default 0.8): Chunks with L2 distance above this value are discarded as irrelevant. Configurable via `RAG_MAX_DISTANCE`.
-
-### Context Construction
-
-Retrieved chunks are formatted as numbered, source-attributed blocks:
-
-```
-[Source 1 | report.pdf | Page 3 | Chunk 7]
-<chunk text>
-
-[Source 2 | report.pdf | Page 4 | Chunk 8]
-<chunk text>
-```
-
-This format preserves source identity and lets the LLM reference specific sources in its answer.
-
-### Prompt Design
-
-The prompt instructs the LLM to:
-1. Answer using ONLY the provided context
-2. Not use outside knowledge or speculate
-3. Respond with a fixed message if info is not available
-4. Reference source identifiers (e.g. `[Source 1]`) for traceability
-5. Provide concise, useful answers
-
-### LLM Generation
-
-Uses `gemini-3.6-flash` via the `google-genai` client. The model name is configurable via the `LLM_MODEL` environment variable.
-
-### Citation Handling
-
-Every citation in the response maps 1-to-1 to an actual chunk retrieved from PostgreSQL. The `RAGResult` includes a `sources` list where each `SourceChunk` contains: `chunk_id`, `document_name`, `text`, `page_number`, `chunk_index`, and `score`.
-
-### Environment Variables
+Set in `.env` (see [.env.example](.env.example)); defaults live in `backend/app/config.py`.
 
 | Variable | Default | Purpose |
 |---|---|---|
-| `DATABASE_URL` | (required) | PostgreSQL connection string |
-| `GEMINI_API_KEY` | (required) | Google Gemini API key |
-| `RAG_TOP_K` | `5` | Number of chunks to retrieve |
-| `RAG_MAX_DISTANCE` | `0.8` | L2 distance threshold for relevance |
-| `LLM_MODEL` | `gemini-3.6-flash` | LLM model name |
-| `EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model name |
-| `EMBEDDING_DIM` | `768` | Embedding dimensionality |
+| `GEMINI_API_KEY` | required | Embeddings, generation, judge |
+| `EVAL_API_KEY` | required for evaluation | Shared secret for `POST /api/eval/run`; without it that endpoint returns 503 |
+| `DATABASE_URL` | set by compose | PostgreSQL connection string |
+| `LLM_MODEL` | `gemini-3.6-flash` | Generation and judge model |
+| `GEMINI_JUDGE_MODEL` | `LLM_MODEL` | Use a different judge model |
+| `EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model (768-d) |
+| `RAG_TOP_K` | `5` | Chunks retrieved by the Ask page |
+| `RAG_MAX_DISTANCE` | `0.8` | L2 distance gate |
+| `RERANKER_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Any fastembed cross-encoder; a Docker build arg too |
+| `GEMINI_RETRY_ATTEMPTS` | `8` | Attempts per Gemini call on 429/5xx, backoff 2s→60s |
 
-### Testing
+**Free-tier keys.** Gemini's free tier allows about 100 embedding requests a
+minute, and one PDF of about 20 pages exceeds that. Every Gemini call retries
+rate limits with exponential backoff, so uploads and benchmark runs still
+complete, just slowly: a 24-page PDF takes about 1.5 minutes. The full
+benchmark is about 440 calls.
+
+## Development
 
 ```bash
+# Backend (Python 3.11)
 cd backend
-python -m pytest tests/ -v
+pip install -r requirements-dev.txt
+pytest                      # ~200 tests, no network, no database, no API key
+uvicorn app.main:app --reload
+
+# Frontend (Node 20)
+cd frontend
+npm ci
+npm run dev                 # proxies API paths to localhost:8000
 ```
 
-All Week 3 tests use mocks — no paid API calls required.
+Tests patch every external boundary (Gemini, pgvector, the reranker model), so
+they run anywhere. Persistence tests use real SQLite. CI
+(`.github/workflows/ci.yml`) runs the backend tests and the frontend build on
+every pull request. `backend/test_e2e.py` is a manual end-to-end check that
+uses the real API and database.
 
-### Integration Example (for Member B — Query API)
-
-```python
-from sqlalchemy.orm import Session
-from app.rag_pipeline import query_rag
-
-def handle_query(db: Session, user_question: str):
-    result = query_rag(db, user_question)
-
-    return {
-        "answer": result.answer,
-        "sources": [
-            {
-                "chunk_id": src.chunk_id,
-                "document": src.document_name,
-                "text": src.text,
-                "page": src.page_number,
-                "chunk_index": src.chunk_index,
-                "score": src.score,
-            }
-            for src in result.sources
-        ],
-    }
+```
+backend/app/
+  main.py              FastAPI app, document + query endpoints, startup
+  ingestion.py utils.py services.py    extract → clean → chunk → embed, pgvector search
+  rag_pipeline.py retrieval.py context.py llm.py   Ask page pipeline (dense, [Source N] citations)
+  rag_pipelines.py     the five retrievers and four benchmark pipelines
+  reranker.py          cross-encoder
+  eval_retrieval.py    Recall/Precision@K, MRR, nDCG
+  eval_generation.py   LLM-as-judge metrics
+  routers/experiments.py  routers/eval.py
+  models.py database.py schemas.py config.py auth.py
+backend/benchmarks/    labelled dataset + source PDF
+frontend/src/pages/    Documents, Ask, RetrievalExperiments, EvaluationDashboard
+scripts/run_benchmark.py
+docs/                  plan, deployment, report, benchmark results
 ```
 
+## Plan coverage
+
+| MVP feature (plan §2) | Where |
+|---|---|
+| PDF upload | `POST /documents/upload/`, Documents page |
+| Text extraction + cleaning | `app/ingestion.py`, `app/utils.py` |
+| Chunking | per-page, 500/50 overlap |
+| Embeddings | `gemini-embedding-001`, 768-d |
+| PostgreSQL + pgvector | `docker-compose.yml`, `app/models.py` |
+| Dense retrieval | `retrieve_dense`, `app/retrieval.py` |
+| BM25 / keyword retrieval | `retrieve_bm25` |
+| Hybrid retrieval | `retrieve_hybrid` (RRF) |
+| Reranking | `app/reranker.py` (cross-encoder) |
+| LLM answer generation | `app/llm.py`, `rag_pipelines._finish` |
+| Citations / source chunks | `[Source N]` / `[chunk_id]`, Ask page |
+| Retrieval + generation evaluation | `app/eval_retrieval.py`, `app/eval_generation.py` |
+| Experiment comparison dashboard | Experiments + Evaluation pages |
+| Docker + deployment | `docker-compose.yml`, [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) |
+
+Week-by-week deliverables, the analysis and interview preparation are in
+[docs/REPORT.md](docs/REPORT.md).
+
+## Limitations
+
+- **BM25 corpus in memory.** BM25 builds its corpus from every chunk on each
+  query. That is fine for a benchmark-sized corpus, but a larger deployment
+  would move to Postgres full-text search or a dedicated index.
+- **Small benchmark.** 22 questions over one paper is enough to compare
+  configurations, not to make claims with statistical confidence. The
+  generation metrics come from an LLM judge, which has its own biases.
+- **Ask page uses Dense only.** It runs the dense pipeline. The other strategies
+  can be explored on the Experiments page and in the benchmark.
+- **No OCR.** Scanned PDFs are rejected.
+- **Minimal access control.** The only protected endpoint is
+  `POST /api/eval/run`, behind a shared key. The plan rules out complex auth.
+
+## Team
+
+Built by Soumyadip Chakraborty and ritur1405 as a two-person project
+(see the plan for the split of responsibilities).
