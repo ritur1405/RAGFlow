@@ -33,7 +33,7 @@ const STRATEGIES = [
   { key: "dense", label: "Dense", color: "#6FB1E0" },
   { key: "bm25", label: "BM25", color: "#E8B85C" },
   { key: "hybrid", label: "Hybrid (RRF)", color: "#B18FE0" },
-  { key: "hybrid_reranker", label: "Hybrid + Reranker", color: "#5FE0B8" },
+  { key: "hybrid_reranker", label: "Hybrid + Cross-Encoder", color: "#5FE0B8" },
   { key: "baseline", label: "Baseline", color: "#8FA3C4" },
 ];
 const STRATEGY_META = Object.fromEntries(STRATEGIES.map((s) => [s.key, s]));

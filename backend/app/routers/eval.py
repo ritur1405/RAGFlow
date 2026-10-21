@@ -68,7 +68,7 @@ RAG_CONFIG_LABELS = {
     RAGConfig.BASELINE: "Baseline RAG",
     RAGConfig.DENSE: "Dense RAG",
     RAGConfig.HYBRID: "Hybrid RAG (Dense + BM25)",
-    RAGConfig.HYBRID_RERANKER: "Hybrid + Reranker",
+    RAGConfig.HYBRID_RERANKER: "Hybrid + Cross-Encoder Reranker",
 }
 
 # Fail fast at import if the enum and the pipeline registry ever drift apart,

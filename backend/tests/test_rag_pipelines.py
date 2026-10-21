@@ -156,18 +156,17 @@ class TestHybridRag:
 
 
 class TestHybridRerankRag:
-    def test_reorders_by_llm_relevance_scores(self, fake_generation):
+    def test_reranks_the_hybrid_pool(self, fake_generation):
         db = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = '{"scores": [{"chunk_id": 1, "relevance": 2}, {"chunk_id": 2, "relevance": 9}]}'
-        client = MagicMock()
-        client.models.generate_content.return_value = mock_response
-
-        with patch.object(rp, "_hybrid_candidates", return_value=[_doc(1, "a"), _doc(2, "b")]), \
-             patch.object(rp, "gemini_client", client):
+        pool = [_doc(1, "a"), _doc(2, "b")]
+        with patch.object(rp, "_hybrid_candidates", return_value=pool) as cands,              patch.object(rp, "cross_encoder_rerank") as rerank:
+            rerank.return_value = [(pool[1], 4.2), (pool[0], -3.0)]
             result = rp.run_hybrid_rerank_rag(db, "q")
 
-        # Doc 2 scored higher, so it must come first.
+        # The reranker sees the wider candidate pool, not just the final top-k.
+        assert cands.call_args.kwargs["top_k"] == rp.RERANK_CANDIDATE_POOL
+        assert rerank.call_args.args[1] == pool
+        assert rerank.call_args.kwargs["top_k"] == rp.FINAL_TOP_K
         assert [d.id for d in result.context_docs] == [2, 1]
 
     def test_reranker_failure_raises_instead_of_degrading_to_hybrid(self, fake_generation):
@@ -177,33 +176,16 @@ class TestHybridRerankRag:
         actually being hybrid, which misrepresents the benchmark.
         """
         db = MagicMock()
-        client = MagicMock()
-        client.models.generate_content.side_effect = RuntimeError("rate limited")
-
-        with patch.object(rp, "_hybrid_candidates", return_value=[_doc(1, "a")]), \
-             patch.object(rp, "gemini_client", client):
-            with pytest.raises(RuntimeError, match="LLM reranker failed"):
+        with patch.object(rp, "_hybrid_candidates", return_value=[_doc(1, "a")]),              patch.object(rp, "cross_encoder_rerank", side_effect=RuntimeError("Cross-encoder reranker failed: x")):
+            with pytest.raises(RuntimeError, match="reranker failed"):
                 rp.run_hybrid_rerank_rag(db, "q")
 
-    def test_malformed_rerank_json_raises(self, fake_generation):
+    def test_empty_candidate_pool_returns_no_answer(self, fake_generation):
         db = MagicMock()
-        mock_response = MagicMock()
-        mock_response.text = "not json at all"
-        client = MagicMock()
-        client.models.generate_content.return_value = mock_response
-
-        with patch.object(rp, "_hybrid_candidates", return_value=[_doc(1, "a")]), \
-             patch.object(rp, "gemini_client", client):
-            with pytest.raises(RuntimeError, match="LLM reranker failed"):
-                rp.run_hybrid_rerank_rag(db, "q")
-
-    def test_empty_candidate_pool_short_circuits(self, fake_generation):
-        db = MagicMock()
-        with patch.object(rp, "_hybrid_candidates", return_value=[]), \
-             patch.object(rp, "gemini_client") as client:
+        with patch.object(rp, "_hybrid_candidates", return_value=[]):
             result = rp.run_hybrid_rerank_rag(db, "q")
 
-        client.models.generate_content.assert_not_called()
+        fake_generation.assert_not_called()
         assert result.answer == NO_ANSWER_MESSAGE
 
 

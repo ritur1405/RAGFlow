@@ -30,7 +30,7 @@ const CONFIG_META = {
   baseline: { label: "Baseline RAG", color: "#8FA3C4" },
   dense: { label: "Dense RAG", color: "#6FB1E0" },
   hybrid: { label: "Hybrid (Dense + BM25)", color: "#B18FE0" },
-  hybrid_reranker: { label: "Hybrid + Reranker", color: "#5FE0B8" },
+  hybrid_reranker: { label: "Hybrid + Cross-Encoder", color: "#5FE0B8" },
 };
 
 const METRIC_META = [
