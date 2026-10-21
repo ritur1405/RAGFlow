@@ -7,7 +7,15 @@ from google.genai import types
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.config import GEMINI_RETRY_ATTEMPTS
+# Model names and thresholds come from app.config, so LLM_MODEL and friends
+# set in the environment apply to every Gemini call, including this module's.
+from app.config import (
+    EMBEDDING_DIM,
+    EMBEDDING_MODEL,
+    GEMINI_RETRY_ATTEMPTS,
+    LLM_MODEL,
+    NO_ANSWER_MESSAGE,
+)
 from app.models import Document
 from app.quota import with_quota_retry
 
@@ -38,18 +46,6 @@ client.models.embed_content = with_quota_retry(
     client.models.embed_content, GEMINI_RETRY_ATTEMPTS
 )
 
-EMBEDDING_MODEL = "gemini-embedding-001"
-LLM_MODEL = "gemini-3.6-flash"  # gemini-2.5-flash is no longer available to new users
-EMBEDDING_DIM = 768  # Matches app/models.py: Column(Vector(768))
-
-# pgvector's <-> operator returns L2 distance (lower = more similar) for a
-# plain Vector column with no explicit ops class. This is a STARTING threshold,
-# not a universal constant — tune it against your own data/embedding model by
-# running a batch of known-good and known-bad queries and inspecting the
-# distances search_documents() returns.
-MAX_RELEVANT_DISTANCE = 0.8
-
-NO_ANSWER_MESSAGE = "I cannot find relevant information in the provided documents."
 
 
 def generate_embedding(text_content: str, task_type: str = "RETRIEVAL_DOCUMENT") -> list[float]:

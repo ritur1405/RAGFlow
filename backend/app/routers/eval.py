@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_eval_api_key
 from app.benchmark import load_benchmark
+from app.config import JUDGE_MODEL, LLM_MODEL
 from app.database import SessionLocal, get_db
 from app.eval_generation import (
     ContextChunk,
@@ -446,6 +447,12 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
             ) from exc
 
     return EvalRunResponse(runs=[_summary_from_run(r) for r in completed])
+
+
+@router.get("/models")
+def get_models():
+    """Which models generate answers and judge them, so results can be labelled."""
+    return {"generation": LLM_MODEL, "judge": JUDGE_MODEL}
 
 
 @router.get("/benchmark")

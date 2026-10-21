@@ -21,7 +21,15 @@ EMBED_TASK_QUERY: str = "RETRIEVAL_QUERY"
 # ---------------------------------------------------------------------------
 # LLM configuration
 # ---------------------------------------------------------------------------
-LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-3.6-flash")
+# Defaults are chosen to fit the Gemini free tier (limits per model, per day):
+# gemini-3.5-flash-lite allows 500 requests/day versus 20 for gemini-3.6-flash,
+# enough for the Ask page and a full benchmark run without billing.
+LLM_MODEL: str = os.getenv("LLM_MODEL", "gemini-3.5-flash-lite")
+
+# The evaluation judge (app/eval_generation.py). A different model family from
+# the generator, so the judge is not grading its own model's answers, with its
+# own free-tier quota (14,400 requests/day).
+JUDGE_MODEL: str = os.getenv("GEMINI_JUDGE_MODEL", "gemma-4-31b-it")
 
 # Total attempts per Gemini call on a per-minute rate limit or a transient
 # server error (app/services.py, app/quota.py). Daily-quota errors are never

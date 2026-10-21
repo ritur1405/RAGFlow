@@ -756,3 +756,9 @@ class TestBenchmarkEndpoint:
     def test_missing_file_is_404(self, anon_client, tmp_path):
         with patch("app.benchmark.BENCHMARK_PATH", tmp_path / "nope.json"):
             assert anon_client.get("/api/eval/benchmark").status_code == 404
+
+
+def test_models_endpoint_reports_generation_and_judge(anon_client):
+    from app.config import JUDGE_MODEL, LLM_MODEL
+
+    assert anon_client.get("/api/eval/models").json() == {"generation": LLM_MODEL, "judge": JUDGE_MODEL}
