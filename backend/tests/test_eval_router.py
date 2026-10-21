@@ -652,3 +652,95 @@ class TestNoFabricatedMetrics:
         root = Path(__file__).resolve().parents[2]
         src = (root / "backend/app/routers/eval.py").read_text(encoding="utf-8")
         assert "create_all" not in src
+
+
+# --------------------------------------------------------------------------- #
+# Retrieval metrics
+# --------------------------------------------------------------------------- #
+
+
+def _paged_result(pages) -> PipelineResult:
+    return PipelineResult(
+        answer="Answer. [1]",
+        context_docs=[
+            Document(id=i, file_name="paper.pdf", title="paper.pdf", content=f"c{i}", page_number=p)
+            for i, p in enumerate(pages, start=1)
+        ],
+        cited_chunk_ids=["1"],
+        latency_ms=100.0,
+    )
+
+
+class TestRetrievalMetrics:
+    def test_labelled_questions_get_retrieval_metrics(self, client):
+        payload = {
+            "dataset_name": "labelled",
+            "questions": [
+                {"question": "q1", "source_file": "paper.pdf", "relevant_pages": [5]},
+                {"question": "q2", "source_file": "paper.pdf", "relevant_pages": [7]},
+                {"question": "q3"},  # unlabelled: judged, but no retrieval metrics
+            ],
+            "rag_configs": ["hybrid"],
+        }
+        with patch("app.routers.eval.judge_available", return_value=True), \
+             patch("app.routers.eval.run_pipeline", new_callable=AsyncMock) as pipe, \
+             patch("app.routers.eval.run_generation_eval", new_callable=AsyncMock) as judge:
+            pipe.side_effect = [
+                _paged_result([5, 9, 5]),   # q1: hit at ranks 1 and 3
+                _paged_result([9, 9, 9]),   # q2: miss
+                _paged_result([5, 5, 5]),   # q3: no labels
+            ]
+            judge.return_value = _eval_result()
+            resp = client.post("/api/eval/run", json=payload)
+
+        assert resp.status_code == 201
+        run = resp.json()["runs"][0]
+        assert run["retrieval_k"] == 3
+        assert run["num_labelled"] == 2
+        # Averaged over the two labelled questions only.
+        assert run["avg_precision_at_k"] == pytest.approx((2 / 3 + 0) / 2)
+        assert run["avg_recall_at_k"] == pytest.approx((1 + 0) / 2)
+        assert run["avg_mrr"] == pytest.approx((1 + 0) / 2)
+        assert 0 < run["avg_ndcg_at_k"] < 0.5
+
+        detail = client.get(f"/api/eval/results/{run['run_id']}").json()
+        by_q = {r["question"]: r for r in detail["results"]}
+        assert by_q["q1"]["relevant_pages"] == [5]
+        assert by_q["q1"]["retrieved_pages"] == [5, 9, 5]
+        assert by_q["q1"]["retrieval"]["reciprocal_rank"] == 1.0
+        assert by_q["q2"]["retrieval"]["recall_at_k"] == 0.0
+        assert by_q["q3"]["retrieval"] is None
+        assert by_q["q3"]["retrieved_pages"] == [5, 5, 5]
+
+        compare = client.get("/api/eval/compare").json()["configs"]
+        hybrid = next(c for c in compare if c["rag_config"] == "hybrid")
+        assert hybrid["avg_mrr"] == pytest.approx(0.5)
+
+    def test_unlabelled_runs_report_null_retrieval_metrics(
+        self, client, patched_pipeline_and_judge
+    ):
+        run = client.post("/api/eval/run", json=_PAYLOAD).json()["runs"][0]
+        assert run["num_labelled"] is None
+        assert run["avg_ndcg_at_k"] is None
+
+    def test_rejects_non_positive_pages(self, client, patched_pipeline_and_judge):
+        payload = {**_PAYLOAD, "questions": [{"question": "q", "relevant_pages": [0]}]}
+        assert client.post("/api/eval/run", json=payload).status_code == 422
+
+
+class TestBenchmarkEndpoint:
+    def test_serves_a_valid_labelled_dataset(self, anon_client):
+        from app.routers.eval import EvalRunRequest
+
+        resp = anon_client.get("/api/eval/benchmark")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        request = EvalRunRequest(dataset_name=data["dataset_name"], questions=data["questions"])
+        assert len(request.questions) >= 20
+        assert all(q.relevant_pages and q.source_file for q in request.questions)
+        assert data["source"]["file_name"] == request.questions[0].source_file
+
+    def test_missing_file_is_404(self, anon_client, tmp_path):
+        with patch("app.routers.eval.BENCHMARK_PATH", tmp_path / "nope.json"):
+            assert anon_client.get("/api/eval/benchmark").status_code == 404

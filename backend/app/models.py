@@ -68,6 +68,15 @@ class EvalRun(Base):
     avg_overall_score = Column(Float, nullable=True)
     avg_latency_ms = Column(Float, nullable=True)
 
+    # Retrieval metrics over the questions that carry relevance labels
+    # (app/eval_retrieval.py). Null when no question in the run is labelled.
+    retrieval_k = Column(Integer, nullable=True)
+    num_labelled = Column(Integer, nullable=True)
+    avg_precision_at_k = Column(Float, nullable=True)
+    avg_recall_at_k = Column(Float, nullable=True)
+    avg_mrr = Column(Float, nullable=True)
+    avg_ndcg_at_k = Column(Float, nullable=True)
+
     results = relationship(
         "EvalResult", back_populates="run", cascade="all, delete-orphan"
     )
@@ -103,6 +112,16 @@ class EvalResult(Base):
     # separately so retrieval/generation cost is not conflated with scoring.
     pipeline_latency_ms = Column(Float, nullable=True)
     judge_latency_ms = Column(Float, nullable=True)
+
+    # Relevance labels from the benchmark dataset and the retrieval metrics
+    # they produce. All null for an unlabelled question.
+    source_file = Column(String, nullable=True)
+    relevant_pages = Column(JSON, nullable=True)      # list[int]
+    retrieved_pages = Column(JSON, nullable=True)     # list[int | None], ranked
+    precision_at_k = Column(Float, nullable=True)
+    recall_at_k = Column(Float, nullable=True)
+    reciprocal_rank = Column(Float, nullable=True)
+    ndcg_at_k = Column(Float, nullable=True)
 
     run = relationship("EvalRun", back_populates="results")
 
