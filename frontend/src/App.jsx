@@ -1,5 +1,12 @@
 import { NavLink, Route, Routes } from "react-router-dom";
 import EvaluationDashboard from "./pages/EvaluationDashboard.jsx";
+import RetrievalExperiments from "./pages/RetrievalExperiments.jsx";
+
+const NAV = [
+  { to: "/", label: "Home", end: true },
+  { to: "/experiments", label: "Experiments" },
+  { to: "/evaluation", label: "Evaluation" },
+];
 
 function HomePage() {
   return (
@@ -15,12 +22,20 @@ function HomePage() {
         context relevance, and citation accuracy across Baseline, Dense, Hybrid,
         and Hybrid + Reranker.
       </p>
-      <NavLink
-        to="/evaluation"
-        className="mt-8 inline-flex rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
-      >
-        Open evaluation dashboard
-      </NavLink>
+      <div className="mt-8 flex flex-wrap gap-3">
+        <NavLink
+          to="/experiments"
+          className="inline-flex rounded-lg border border-cyan-500 px-4 py-2 text-sm font-semibold text-cyan-400 hover:bg-cyan-500/10"
+        >
+          Compare retrievers
+        </NavLink>
+        <NavLink
+          to="/evaluation"
+          className="inline-flex rounded-lg bg-cyan-500 px-4 py-2 text-sm font-semibold text-slate-950 hover:bg-cyan-400"
+        >
+          Open evaluation dashboard
+        </NavLink>
+      </div>
     </div>
   );
 }
@@ -34,27 +49,24 @@ export default function App() {
             RAGOps
           </NavLink>
           <div className="flex gap-4 text-sm text-slate-400">
-            <NavLink
-              to="/"
-              className={({ isActive }) =>
-                isActive ? "text-cyan-400" : "hover:text-slate-200"
-              }
-            >
-              Home
-            </NavLink>
-            <NavLink
-              to="/evaluation"
-              className={({ isActive }) =>
-                isActive ? "text-cyan-400" : "hover:text-slate-200"
-              }
-            >
-              Evaluation
-            </NavLink>
+            {NAV.map((item) => (
+              <NavLink
+                key={item.to}
+                to={item.to}
+                end={item.end}
+                className={({ isActive }) =>
+                  isActive ? "text-cyan-400" : "hover:text-slate-200"
+                }
+              >
+                {item.label}
+              </NavLink>
+            ))}
           </div>
         </nav>
       </header>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/experiments" element={<RetrievalExperiments />} />
         <Route path="/evaluation" element={<EvaluationDashboard />} />
       </Routes>
     </div>

@@ -9,6 +9,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from "recharts";
+import { fetchJSON, fmtLatency, postJSON } from "../lib/api.js";
 
 /**
  * EvaluationDashboard.jsx
@@ -24,11 +25,6 @@ import {
  * monospace numerals for every score and latency figure, since this is a
  * data-auditing tool for engineers, not a marketing surface.
  */
-
-// Relative by default: the vite dev server proxies these paths in development
-// and nginx proxies them in the Docker image, so no absolute host is baked in.
-// Set VITE_API_BASE_URL to point at a backend on another origin.
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "";
 
 const CONFIG_META = {
   baseline: { label: "Baseline RAG", color: "#8FA3C4" },
@@ -67,45 +63,6 @@ function ScoreText({ score, digits = 2 }) {
       {score.toFixed(digits)}
     </span>
   );
-}
-
-function fmtLatency(ms) {
-  if (ms === null || ms === undefined) return "—";
-  return ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${Math.round(ms)}ms`;
-}
-
-/** Surfaces the backend's `detail` message so a 502/503 is legible in the UI. */
-async function readError(res) {
-  const body = await res.text().catch(() => "");
-  try {
-    const parsed = JSON.parse(body);
-    if (parsed?.detail) return `${res.status}: ${parsed.detail}`;
-  } catch {
-    /* not JSON; fall through to the raw body */
-  }
-  return `${res.status} ${res.statusText}${body ? `: ${body}` : ""}`;
-}
-
-async function fetchJSON(path) {
-  const res = await fetch(`${API_BASE}${path}`);
-  if (!res.ok) throw new Error(await readError(res));
-  return res.json();
-}
-
-async function postJSON(path, payload, apiKey) {
-  const headers = { "Content-Type": "application/json" };
-  // Sent per request from a value the operator types in. Deliberately not read
-  // from import.meta.env: a VITE_ variable is compiled into the bundle and
-  // would be served to every visitor.
-  if (apiKey) headers["X-API-Key"] = apiKey;
-
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw new Error(await readError(res));
-  return res.json();
 }
 
 /** Remembers the key for this tab only, so it is not persisted to disk. */
