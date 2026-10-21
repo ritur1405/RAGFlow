@@ -61,3 +61,15 @@ def test_encoder_is_loaded_once(monkeypatch):
     assert first is second
     fake_cls.assert_called_once_with(model_name=reranker.RERANKER_MODEL)
     monkeypatch.setattr(reranker, "_encoder", None)
+
+
+def test_warm_up_loads_the_model():
+    with patch.object(reranker, "_get_encoder") as get:
+        reranker.warm_up()
+    get.assert_called_once()
+
+
+def test_warm_up_failure_is_logged_not_raised(caplog):
+    with patch.object(reranker, "_get_encoder", side_effect=OSError("no model")):
+        reranker.warm_up()
+    assert "Could not pre-load" in caplog.text

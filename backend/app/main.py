@@ -1,5 +1,7 @@
 from contextlib import asynccontextmanager
 
+import anyio.to_thread
+
 from fastapi import Depends, FastAPI, HTTPException, Request, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -18,6 +20,7 @@ from app.services import (
 )
 from app.config import NO_ANSWER_MESSAGE
 from app.rag_pipeline import query_rag
+from app.reranker import warm_up as warm_up_reranker
 from app.utils import chunk_text
 from app.schemas import (
     DocumentCreate,
@@ -39,6 +42,8 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     # Databases created before newer nullable columns existed get them added.
     add_missing_columns(engine)
+    # Off the event loop, so startup does not block on model loading.
+    await anyio.to_thread.run_sync(warm_up_reranker)
     yield
 
 
