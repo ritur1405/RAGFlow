@@ -90,3 +90,17 @@ class TestProcessPdfDocument:
         
         with pytest.raises(ValueError, match="does not match chunk count"):
             process_pdf_document(b"fake-bytes")
+
+
+class TestUploadUsesCleaningPipeline:
+    """The upload endpoint's process_pdf must run the cleaning pipeline."""
+
+    def test_process_pdf_returns_cleaned_text_under_text_key(self):
+        from app import services
+
+        fake = [{"content": "knowledge base", "page_number": 3, "chunk_index": 0, "embedding": [0.1]}]
+        with patch("app.ingestion.process_pdf_document", return_value=fake) as pipeline:
+            result = services.process_pdf(b"%PDF")
+
+        pipeline.assert_called_once_with(b"%PDF")
+        assert result == [{**fake[0], "text": "knowledge base"}]
