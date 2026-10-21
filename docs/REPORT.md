@@ -132,7 +132,10 @@ slowest: 6.1 s per query on CPU when re-ranking 100 hits.
 We use capped recall (BEIR Appendix G), so a question with more relevant pages
 than K can still reach 1.0.
 
-**How was faithfulness evaluated?** With an LLM judge at temperature 0.
+**How was faithfulness evaluated?** With an LLM judge (`gemma-4-31b-it`) at
+temperature 0. It is a different model family from the generator
+(`gemini-3.5-flash-lite`), so the judge isn't grading its own model's style.
+One call scores all four metrics, each against its own rubric.
 
 - **Inputs:** the question, the exact retrieved context and the answer.
 - **Task:** break the answer into claims, check each claim against the context,

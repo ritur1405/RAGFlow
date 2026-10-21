@@ -167,7 +167,8 @@ The Ask page uses `app/rag_pipeline.py` (dense retrieval, `[Source N]`
 citations). The benchmark pipelines cite chunk IDs as `[chunk_id]` so citations
 can be checked mechanically. Both prompts allow answering only from the
 retrieved context, and require a fixed "cannot find" sentence when the context
-is insufficient. Generation uses `gemini-3.6-flash`.
+is insufficient. Generation uses `gemini-3.5-flash-lite`, chosen for its free-tier
+allowance (500 requests/day, against 20 for `gemini-3.6-flash`).
 
 ### Evaluation
 
@@ -182,8 +183,12 @@ then measures two things:
   - **Recall@K**: labelled pages hit, using BEIR's capped recall.
   - **MRR**: the reciprocal rank of the first relevant chunk.
   - **nDCG@K**: binary-gain DCG divided by the ideal DCG.
-- **Generation metrics** (`app/eval_generation.py`), scored 0–1 by a Gemini
-  LLM-as-judge at temperature 0, with written reasoning stored for every score:
+- **Generation metrics** (`app/eval_generation.py`), scored 0–1 by an
+  LLM-as-judge at temperature 0, with written reasoning stored for every score.
+  **One judge call scores all four metrics**, each against its own rubric, so
+  judging costs one request per answer instead of four. The judge is
+  `gemma-4-31b-it`: a different model family from the generator, so it isn't
+  grading its own model's answers, with a separate free-tier quota.
   - **Faithfulness**: is every claim supported by the context?
   - **Answer relevance**: does the answer address the question?
   - **Context relevance**: how much of the retrieved context is useful?
@@ -242,19 +247,42 @@ Set in `.env` (see [.env.example](.env.example)); defaults live in `backend/app/
 | `GEMINI_API_KEY` | required | Embeddings, generation, judge |
 | `EVAL_API_KEY` | required for evaluation | Shared secret for `POST /api/eval/run`; without it that endpoint returns 503 |
 | `DATABASE_URL` | set by compose | PostgreSQL connection string |
-| `LLM_MODEL` | `gemini-3.6-flash` | Generation and judge model |
-| `GEMINI_JUDGE_MODEL` | `LLM_MODEL` | Use a different judge model |
+| `LLM_MODEL` | `gemini-3.5-flash-lite` | Answer generation |
+| `GEMINI_JUDGE_MODEL` | `gemma-4-31b-it` | Evaluation judge (Gemma gets its instructions in the prompt; it has no system/JSON mode) |
 | `EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model (768-d) |
 | `RAG_TOP_K` | `5` | Chunks retrieved by the Ask page |
 | `RAG_MAX_DISTANCE` | `0.8` | L2 distance gate |
 | `RERANKER_MODEL` | `Xenova/ms-marco-MiniLM-L-6-v2` | Any fastembed cross-encoder; a Docker build arg too |
 | `GEMINI_RETRY_ATTEMPTS` | `8` | Attempts per Gemini call on 429/5xx, backoff 2s→60s |
 
-**Free-tier keys.** Gemini's free tier allows about 100 embedding requests a
-minute, and one PDF of about 20 pages exceeds that. Every Gemini call retries
-rate limits with exponential backoff, so uploads and benchmark runs still
-complete, just slowly: a 24-page PDF takes about 1.5 minutes. The full
-benchmark is about 440 calls.
+**Zero cost on the free tier.** The project is designed to run entirely
+on Gemini's free tier, with no billing. Limits are per model:
+
+| Model | Used for | Requests/min | Requests/day |
+|---|---|---:|---:|
+| `gemini-3.5-flash-lite` | Ask page, benchmark answers | 15 | 500 |
+| `gemma-4-31b-it` | Evaluation judge | 30 | 14,400 |
+| `gemini-embedding-001` | Ingestion, queries | 100 | 1,000 |
+
+- **Per-minute limits** are retried after the server's suggested delay. A
+  24-page upload exceeds the embedding limit and takes about 1.5 minutes.
+- **Daily limits** fail immediately with a **503** that names the model, from
+  every endpoint, including Ask.
+- **The full benchmark** is 88 generation, 88 judge and 88 embedding
+  requests, within one day's allowance.
+- **The runner refuses** any run that would exceed `--max-calls-per-model`,
+  and saves progress. A run cut short by a quota continues where it stopped:
+
+```bash
+python scripts/run_benchmark.py --plan            # show the requests per model
+python scripts/run_benchmark.py --questions 1-5   # run a slice
+python scripts/run_benchmark.py                   # run whatever is left
+```
+
+See your own limits at [aistudio.google.com/rate-limit](https://aistudio.google.com/rate-limit).
+Gemma on the free tier can be slow and intermittently returns 500s. The
+client retries these, so a full benchmark run takes 2–3 hours, mostly waiting
+on the judge.
 
 ## Development
 

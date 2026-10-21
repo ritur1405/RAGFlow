@@ -105,13 +105,22 @@ Data lives in the `pgdata` named volume, so it survives `down` and `up` but not
 
 ## Rate limits
 
-Every Gemini call retries 429 and 5xx responses with exponential backoff from
-2s up to 60s, for up to `GEMINI_RETRY_ATTEMPTS` (default 8) attempts. That rides
-out per-minute quotas, which the free tier hits on any multi-page upload.
+The defaults are chosen to run free on the Gemini free tier (see the README's
+"Zero cost on the free tier"). Every Gemini call handles limits this way:
 
-Daily quotas cannot be retried away. When they run out:
+- **Transient server errors (5xx):** retried with exponential backoff from 2s
+  up to 60s.
+- **Per-minute rate limits (429):** retried after the server's suggested
+  delay.
+- **Both** stop after `GEMINI_RETRY_ATTEMPTS` (default 8) attempts.
 
-- uploads return **503** with the provider's message
-- evaluation runs are marked **failed** with the error recorded
+Daily quotas cannot be retried away, so they fail at once. When one runs out:
 
-Neither reports misleading results.
+- **Every endpoint** returns **503**, with a message naming the model and
+  saying the limit resets daily. The Ask page shows that message instead of an
+  answer.
+- **Evaluation runs** are marked **failed** with the error recorded.
+- **`scripts/run_benchmark.py`** stops and keeps its progress for the next
+  run.
+
+None of these reports misleading results.
