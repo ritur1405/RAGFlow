@@ -260,6 +260,49 @@ def _retrieval_aggregates(run: EvalRun) -> dict:
     }
 
 
+def _mean(values: list) -> Optional[float]:
+    return sum(values) / len(values) if values else None
+
+
+def _benchmark_aggregates(db: Session, run: EvalRun) -> dict:
+    """Averages over the newest completed result per question for run's config and dataset.
+
+    scripts/run_benchmark.py sends a few questions per request, one run each,
+    so a configuration's full benchmark is spread over several runs. Averaging
+    only the latest run would report a one-question batch as the configuration.
+    """
+    rows = db.execute(
+        select(EvalResult)
+        .join(EvalRun, EvalResult.run_id == EvalRun.id)
+        .where(
+            EvalRun.rag_config == run.rag_config,
+            EvalRun.dataset_name == run.dataset_name,
+            EvalRun.status == "completed",
+        )
+        .order_by(EvalRun.created_at.desc())
+    ).scalars().all()
+    latest: dict[str, EvalResult] = {}
+    for row in rows:
+        latest.setdefault(row.question, row)
+    results = list(latest.values())
+    labelled = [r for r in results if r.precision_at_k is not None]
+    return {
+        "num_questions": len(results),
+        "avg_faithfulness": _mean([r.faithfulness_score for r in results]),
+        "avg_answer_relevance": _mean([r.answer_relevance_score for r in results]),
+        "avg_context_relevance": _mean([r.context_relevance_score for r in results]),
+        "avg_citation_accuracy": _mean([r.citation_accuracy_score for r in results]),
+        "avg_overall_score": _mean([r.overall_score for r in results]),
+        "avg_latency_ms": _mean([r.pipeline_latency_ms for r in results if r.pipeline_latency_ms is not None]),
+        "retrieval_k": run.retrieval_k if labelled else None,
+        "num_labelled": len(labelled) or None,
+        "avg_precision_at_k": _mean([r.precision_at_k for r in labelled]),
+        "avg_recall_at_k": _mean([r.recall_at_k for r in labelled]),
+        "avg_mrr": _mean([r.reciprocal_rank for r in labelled]),
+        "avg_ndcg_at_k": _mean([r.ndcg_at_k for r in labelled]),
+    }
+
+
 def _mark_failed(db: Session, run: EvalRun, exc: Exception) -> None:
     """Records the failure on the run so it is visible, then leaves it failed."""
     run.status = "failed"
@@ -477,7 +520,10 @@ def compare_configs(
 ):
     """Side-by-side aggregate comparison, one row per configuration.
 
-    Only completed runs are considered, so a failed run never contributes
+    By default each row averages the newest completed result per question
+    across that configuration's runs on its latest dataset, so a benchmark
+    sent in batches is reported whole. With run_ids, each row is exactly the
+    newest of the given runs. Only completed runs are considered, so a failed run never contributes
     numbers to the comparison. A configuration with no completed run reports
     nulls rather than zeros, letting the dashboard distinguish "not measured"
     from "measured as zero".
@@ -508,6 +554,17 @@ def compare_configs(
                     avg_overall_score=None,
                     avg_latency_ms=None,
                     created_at=None,
+                )
+            )
+        elif not explicit_ids:
+            rows.append(
+                CompareRow(
+                    rag_config=config,
+                    rag_config_label=RAG_CONFIG_LABELS[config],
+                    run_id=run.id,
+                    dataset_name=run.dataset_name,
+                    **_benchmark_aggregates(db, run),
+                    created_at=run.created_at,
                 )
             )
         else:
