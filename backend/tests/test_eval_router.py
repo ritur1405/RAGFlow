@@ -425,6 +425,29 @@ class TestCompare:
         assert rows["dense"]["num_questions"] == 1
         assert rows["baseline"]["avg_overall_score"] is None
 
+    def test_combines_a_benchmark_sent_in_batches(self, client):
+        def run(questions, *scores):
+            with patch("app.routers.eval.judge_available", return_value=True), \
+                 patch("app.routers.eval.run_pipeline", new_callable=AsyncMock) as pipe, \
+                 patch("app.routers.eval.run_generation_eval", new_callable=AsyncMock) as judge:
+                pipe.return_value = _pipeline_result()
+                judge.side_effect = [_eval_result(overall=s) for s in scores]
+                return client.post("/api/eval/run", json={
+                    "dataset_name": "d", "rag_configs": ["dense"],
+                    "questions": [{"question": q} for q in questions],
+                }).json()["runs"][0]["run_id"]
+
+        run(["q1", "q2"], 0.0, 1.0)
+        latest = run(["q2", "q3"], 0.5, 0.5)  # q2 re-run: only its newest result counts
+
+        rows = {c["rag_config"]: c for c in client.get("/api/eval/compare").json()["configs"]}
+        assert rows["dense"]["num_questions"] == 3
+        assert rows["dense"]["avg_overall_score"] == pytest.approx((0.0 + 0.5 + 0.5) / 3)
+        assert rows["dense"]["run_id"] == latest
+        # Asking for one run still reports exactly that run.
+        only = client.get(f"/api/eval/compare?run_ids={latest}").json()["configs"]
+        assert next(c for c in only if c["rag_config"] == "dense")["num_questions"] == 2
+
 
 # --------------------------------------------------------------------------- #
 # Contract and hygiene guards

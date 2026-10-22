@@ -3,7 +3,7 @@
 This is the plan's Week 4 deliverable. It compares all five retrieval strategies
 on the shared, page-labelled benchmark, with the Week 5 retrieval metrics.
 
-**Run date:** 2026-10-21. **Corpus:** the BEIR paper (24 pages, 222 cleaned
+**Run date:** 2026-10-22 (Week 6; first run 2026-10-21). **Corpus:** the BEIR paper (24 pages, 222 cleaned
 chunks).
 
 Raw results: [retrieval-k3.json](retrieval-k3.json), [retrieval-k5.json](retrieval-k5.json).
@@ -20,26 +20,29 @@ stays within the Gemini free tier.
 
 ## Results at K=3
 
-K=3 is the number of chunks the generator receives.
+K=3 is the number of chunks the generator receives. Week 6 numbers, after the
+BM25 tokeniser fix ([tuning.md](tuning.md)).
 
 | Strategy | Recall@3 | Precision@3 | MRR | nDCG@3 | Retrieval latency* |
 |---|---:|---:|---:|---:|---:|
-| Baseline (dense, no gate) | **0.864** | **0.606** | **0.894** | **0.655** | 4 ms |
-| Dense (distance gate 0.8) | **0.864** | **0.606** | **0.894** | **0.655** | 2 ms |
-| BM25 | 0.508 | 0.303 | 0.508 | 0.328 | 13 ms |
-| Hybrid (Dense + BM25, RRF) | 0.848 | **0.606** | 0.803 | 0.625 | 15 ms |
-| Hybrid + Cross-Encoder | **0.864** | **0.606** | 0.879 | 0.644 | 294 ms |
+| Baseline (dense, no gate) | **0.864** | 0.606 | **0.894** | **0.655** | 6 ms |
+| Dense (distance gate 0.8) | **0.864** | 0.606 | **0.894** | **0.655** | 3 ms |
+| BM25 | 0.765 | 0.530 | 0.773 | 0.564 | 20 ms |
+| Hybrid (Dense + BM25, RRF) | 0.788 | **0.621** | 0.803 | 0.649 | 22 ms |
+| Hybrid + Cross-Encoder | 0.841 | 0.576 | 0.879 | 0.623 | 0.3–1.3 s |
 
-\* Retrieval latency excludes the query embedding (about 420 ms per question
-through the Gemini API), which every strategy except BM25 also pays.
+\* Retrieval latency excludes the query embedding (about 0.4–0.5 s per
+question through the Gemini API), which every strategy except BM25 also pays.
+The cross-encoder runs on CPU, so its time depends on the host: 294 ms on an
+idle machine in Week 4, 0.56–1.34 s in repeated Week 6 runs on a laptop.
 
 ### nDCG@3 by question type
 
 | Type (n) | Dense | BM25 | Hybrid | Hybrid + CE |
 |---|---:|---:|---:|---:|
-| factual (7) | 0.529 | 0.310 | **0.614** | **0.614** |
-| keyword (9) | **0.771** | 0.346 | 0.646 | 0.693 |
-| paraphrase (6) | **0.628** | 0.323 | 0.607 | 0.607 |
+| factual (7) | 0.529 | 0.638 | 0.605 | **0.647** |
+| keyword (9) | **0.771** | 0.601 | 0.731 | 0.641 |
+| paraphrase (6) | **0.628** | 0.422 | 0.578 | 0.568 |
 
 ## Results at K=5
 
@@ -47,9 +50,9 @@ through the Gemini API), which every strategy except BM25 also pays.
 |---|---:|---:|---:|---:|
 | Baseline | 0.902 | **0.545** | **0.894** | **0.601** |
 | Dense | 0.902 | **0.545** | **0.894** | **0.601** |
-| BM25 | 0.697 | 0.264 | 0.560 | 0.294 |
-| Hybrid (RRF) | 0.924 | 0.464 | 0.823 | 0.521 |
-| Hybrid + Cross-Encoder | **0.939** | **0.545** | 0.879 | 0.592 |
+| BM25 | 0.803 | 0.409 | 0.773 | 0.471 |
+| Hybrid (RRF) | 0.939 | 0.518 | 0.835 | 0.571 |
+| Hybrid + Cross-Encoder | **0.955** | 0.536 | 0.879 | 0.582 |
 
 ## Findings
 
@@ -58,34 +61,32 @@ through the Gemini API), which every strategy except BM25 also pays.
    and Dense score the same because the 0.8 L2 distance gate never fires on
    this corpus: relevant chunks sit around 0.4–0.5. The gate's value is
    rejecting off-topic questions, not reranking.
-2. **BM25 is weak, and the cause is in our tokeniser rather than in BM25.**
-   - BM25 often fills its top 3 with pages 23, 16 and 17: the BEIR examples
-     table and the reference pages. These are long, term-dense chunks, so they
-     match many query words.
-   - The tokeniser is `text.lower().split()`. Punctuation stays attached
-     (`bm25?` never matches `bm25,`), and stopwords such as "what", "the" and
-     "does" count as matches.
-   - On a 222-chunk corpus, IDF does little to suppress stopwords.
-   - This is the main target for Week 6 retrieval optimisation.
+2. **BM25 was weak because of our tokeniser, and fixing it made BM25 a real
+   contender.**
+   - Week 4 used `text.lower().split()`: punctuation stayed attached
+     (`bm25?` never matched `bm25,`), and stopwords such as "what" and "the"
+     matched almost every chunk, so long, term-dense pages (the examples
+     table, the references) filled its top 3.
+   - With lowercase words, punctuation stripped and stopwords dropped, BM25's
+     nDCG@3 rose from 0.328 to 0.564 and MRR from 0.508 to 0.773.
+   - BM25 is now the best single retriever on *factual* questions (0.638 vs
+     dense 0.529), where the question reuses the paper's wording. It is still
+     weakest on *paraphrase* questions, as expected.
 3. **Hybrid trades rank quality for coverage.**
-   - At K=5 hybrid reaches the highest Recall@5 of the first-stage
-     strategies, 0.924 against 0.902 for dense: fusion surfaces relevant
-     pages that dense alone misses (questions 8, 11, 16, 20, 21).
-   - But BM25's noisy rankings push some good dense hits down (questions 2,
-     4, 12, 13, 17), so MRR drops from 0.894 to 0.803 at K=3.
-   - Hybrid is best on *factual* questions (nDCG@3 0.614 vs 0.529), and worst
-     against dense on *keyword* questions. That is the opposite of the usual
-     expectation, and it again points at the tokeniser: exact-term matching is
-     BM25's whole job, and it is failing at it here.
-4. **The cross-encoder recovers most of what fusion loses.** It reorders the
-   8-chunk hybrid pool, raising MRR from 0.803 to 0.879 and nDCG@3 from 0.625
-   to 0.644, and it gives the best Recall@5 overall (0.939). It costs about
-   290 ms per query on CPU. That is still under the 420 ms query embedding,
-   and far below LLM generation.
-5. **Latency ranking:** pgvector search (2–4 ms) < BM25 over 222 chunks
-   (13 ms; it rebuilds the in-memory index every query) ≈ hybrid (15 ms) ≪
-   cross-encoder (~290 ms). The query embedding (~420 ms) dominates every
-   dense-based strategy end to end.
+   - At K=5 hybrid reaches Recall@5 0.939 against 0.902 for dense: fusion
+     surfaces relevant pages that dense alone misses.
+   - At K=3 BM25's hits displace some good dense hits, so Recall@3 drops from
+     0.864 to 0.788 and MRR from 0.894 to 0.803. Hybrid has the best
+     Precision@3 (0.621).
+4. **The cross-encoder restores ranking.** Re-scoring the 8-chunk hybrid pool
+   raises MRR from 0.803 to 0.879 and gives the best Recall@5 overall (0.955).
+   It is the best strategy on factual questions (nDCG@3 0.647). It is the only
+   strategy whose cost is noticeable: hundreds of milliseconds per query on
+   CPU, comparable to the query embedding and far below LLM generation.
+5. **Latency ranking:** pgvector search (3–6 ms) < BM25 over 222 chunks
+   (20 ms; it rebuilds the in-memory index every query) ≈ hybrid (22 ms) ≪
+   cross-encoder (0.3–1.3 s). The query embedding (~0.45 s) dominates every
+   dense-based strategy apart from the reranker.
 
 ## Methodology
 
@@ -121,7 +122,8 @@ used in the product:
 
 - **Baseline:** top-K by L2 distance.
 - **Dense:** top-8 by L2, filtered at distance 0.8, keep top-K.
-- **BM25:** Okapi over all chunks.
+- **BM25:** Okapi over all chunks, tokenised as lowercase words without
+  punctuation or stopwords.
 - **Hybrid:** RRF (k=60) of dense top-8 and BM25 top-8.
 - **Hybrid + CE:** hybrid top-8 re-scored by `ms-marco-MiniLM-L-6-v2`.
 
@@ -140,5 +142,6 @@ used in the product:
   mean by about 0.045.
 - **One labeller:** the question set was written by the same people who built
   the system.
-- **No tuning yet:** all parameters are the defaults. Week 6 tunes them with a
-  held-out split.
+- **Tuning:** the candidate pool and RRF constant were grid-searched in
+  Week 6 with a held-out split, and the defaults held; see
+  [tuning.md](tuning.md).

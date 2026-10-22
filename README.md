@@ -93,30 +93,34 @@ python scripts/run_benchmark.py            # --questions 1-2 for a quick smoke t
 
 | Strategy | Recall@3 | Precision@3 | MRR | nDCG@3 | Retrieval latency |
 |---|---:|---:|---:|---:|---:|
-| Dense | **0.864** | **0.606** | **0.894** | **0.655** | 2 ms |
-| BM25 | 0.508 | 0.303 | 0.508 | 0.328 | 13 ms |
-| Hybrid (RRF) | 0.848 | **0.606** | 0.803 | 0.625 | 15 ms |
-| Hybrid + Cross-Encoder | **0.864** | **0.606** | 0.879 | 0.644 | 294 ms |
+| Dense | **0.864** | 0.606 | **0.894** | **0.655** | 3 ms |
+| BM25 | 0.765 | 0.530 | 0.773 | 0.564 | 20 ms |
+| Hybrid (RRF) | 0.788 | **0.621** | 0.803 | 0.649 | 22 ms |
+| Hybrid + Cross-Encoder | 0.841 | 0.576 | 0.879 | 0.623 | 0.3–1.3 s |
 
-Dense is the strongest single retriever on this corpus. BM25 is held back by
-its naive tokeniser. Hybrid gains coverage (the best first-stage Recall@5, at
-0.924) but loses rank quality to BM25's noise, and the cross-encoder recovers
-most of that. The query embedding (~420 ms) is excluded from latency. The full
+Dense is the strongest single retriever on this corpus. Fixing BM25's
+tokeniser in Week 6 raised its nDCG@3 from 0.328 to 0.564, and BM25 is now
+best on questions that reuse the paper's wording. Hybrid gains coverage (Recall@5
+0.939 against dense's 0.902) but loses some rank quality at K=3, and the
+cross-encoder recovers most of it (MRR 0.879) at the cost of a CPU pass per
+candidate. The query embedding (~0.45 s) is excluded from latency. The full
 tables (K=3 and K=5, plus results by question type), the findings and the
-methodology are in [docs/benchmarks/retrieval.md](docs/benchmarks/retrieval.md).
+methodology are in [docs/benchmarks/retrieval.md](docs/benchmarks/retrieval.md);
+the Week 6 tuning is in [docs/benchmarks/tuning.md](docs/benchmarks/tuning.md).
 The benchmark makes no generation calls and costs nothing on the free tier.
 
 ### Generation (LLM-judged)
 
 All 22 questions, answered by `gemini-3.5-flash-lite` and scored 0–1 by
-`gemma-4-31b-it`. Latency is retrieval plus generation, excluding judging.
+`gemma-4-31b-it`, with the Week 6 code. Latency is retrieval plus generation,
+excluding judging, as a median.
 
-| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Refusals | Pipeline latency |
+| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Refusals | Median latency |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 4 | 1.36 s |
-| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | 5 | **1.30 s** |
-| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 7 | 1.38 s |
-| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 5 | 2.49 s |
+| Baseline | 0.955 | 0.773 | 0.597 | 0.955 | 0.847 | 5 | 5.0 s |
+| Dense | 0.955 | **0.809** | **0.605** | 0.955 | 0.856 | 4 | 4.4 s |
+| Hybrid (RRF) | **1.000** | 0.682 | 0.594 | 0.991 | 0.853 | 7 | 4.3 s |
+| Hybrid + Cross-Encoder | **1.000** | 0.727 | 0.603 | **1.000** | **0.866** | 6 | 5.1 s |
 
 *Refusals* are the answer "I cannot find relevant information in the provided
 documents.", given when retrieval finds nothing close enough or the retrieved
@@ -124,19 +128,25 @@ context doesn't contain the answer. The judge scores a refusal 1.0 for
 faithfulness and citation accuracy and 0.0 for answer relevance, so refusals
 drive most of the differences between configurations.
 
-- **Hybrid + Cross-Encoder is the best configuration** (overall 0.882). All 17
-  of its non-refusal answers were judged fully grounded with correct
-  citations, for about 1.1 s more per answer.
+- **Hybrid + Cross-Encoder is the best configuration** (overall 0.866). All 16
+  of its non-refusal answers were judged fully grounded, relevant and
+  correctly cited.
 - **Hybrid without reranking refuses most often** (7 of 22), which gives it
-  the lowest answer relevance (0.659). Its 15 actual answers score 0.967.
-- **On the questions they answer**, Baseline and Dense score 1.000 answer
-  relevance but about 0.94 faithfulness: a few claims went beyond the
-  context.
+  the lowest answer relevance (0.682). Its 15 actual answers are all fully
+  grounded and relevant.
+- **Dense answers the most questions** (18 of 22) and has the best answer
+  relevance, but a few of its answers include claims the context doesn't
+  support (faithfulness 0.944 on the questions it answers), as with Baseline.
+- **Latency is dominated by the Gemini API**, whose response time varied
+  several-fold between runs (median 1.3 s on 21 October, 4–5 s on 22
+  October). The retrieval steps add 3 ms to about 1 s on top
+  ([retrieval.md](docs/benchmarks/retrieval.md)), so the configurations are
+  ranked on quality, not on these end-to-end times.
 
 The full run made 88 generation and 88 judge requests (22 questions × 4
-configurations), all on the free tier. It ran before query embeddings were
-cached, so it also made 88 embedding requests; a run now makes 22. Tables by question type and charts are in
-[docs/benchmarks/results.md](docs/benchmarks/results.md).
+configurations), all on the free tier. Tables by question type and charts are in
+[docs/benchmarks/results.md](docs/benchmarks/results.md); its latency column is
+a mean, which a few slow API calls inflate.
 
 How to read the numbers, and the analysis, are in [docs/REPORT.md](docs/REPORT.md#3-results).
 
@@ -165,7 +175,7 @@ plus cited generation, used by the benchmark).
 |---|---|---|
 | **Baseline** | Top-K pgvector L2 search, no filtering | L2 distance |
 | **Dense** | Top-8 by L2, drop chunks beyond the distance gate (0.8), keep top-K | L2 distance |
-| **BM25** | `BM25Okapi` over all chunks (experiments only) | BM25 |
+| **BM25** | `BM25Okapi` over all chunks; lowercase words, punctuation and stopwords dropped (experiments only) | BM25 |
 | **Hybrid** | Dense top-8 and BM25 top-8 fused with Reciprocal Rank Fusion (k=60) | RRF |
 | **Hybrid + Cross-Encoder** | Hybrid top-8 re-scored by `ms-marco-MiniLM-L-6-v2` | logit |
 
@@ -180,6 +190,9 @@ Why these choices:
   re-scores the 8-chunk hybrid pool. It runs locally through fastembed's ONNX
   runtime, with no PyTorch, no API cost, and deterministic scores. This is the
   setup the BEIR paper found best for zero-shot retrieval.
+- **Tuned on held-out data.** The candidate pool (8) and RRF constant (60)
+  were grid-searched on half the benchmark and checked on the other half; no
+  setting beat them. See [docs/benchmarks/tuning.md](docs/benchmarks/tuning.md).
 - **Failure policy.** A strategy that fails raises an error and is recorded as
   failed. It never silently falls back to another strategy, because that result
   would be filed under the wrong label.
@@ -270,6 +283,8 @@ Set in `.env` (see [.env.example](.env.example)); defaults live in `backend/app/
 | `GEMINI_API_KEY` | required | Embeddings, generation, judge |
 | `EVAL_API_KEY` | required for evaluation | Shared secret for `POST /api/eval/run`; without it that endpoint returns 503 |
 | `DATABASE_URL` | set by compose | PostgreSQL connection string |
+| `POSTGRES_PASSWORD` | `postgrespassword` | Database password, used by both containers; set it before the first start on a server |
+| `WEB_PORT` | `5173` | The one public port (the web app); the API and database listen on localhost only |
 | `LLM_MODEL` | `gemini-3.5-flash-lite` | Answer generation |
 | `GEMINI_JUDGE_MODEL` | `gemma-4-31b-it` | Evaluation judge (Gemma gets its instructions in the prompt; it has no system/JSON mode) |
 | `EMBEDDING_MODEL` | `gemini-embedding-001` | Embedding model (768-d) |
@@ -313,7 +328,7 @@ on the judge.
 # Backend (Python 3.11)
 cd backend
 pip install -r requirements-dev.txt
-pytest                      # ~200 tests, no network, no database, no API key
+pytest                      # ~230 tests, no network, no database, no API key
 uvicorn app.main:app --reload
 
 # Frontend (Node 20)
@@ -375,6 +390,9 @@ Week-by-week deliverables, the analysis and interview preparation are in
 - **Small benchmark.** 22 questions over one paper is enough to compare
   configurations, not to make claims with statistical confidence. The
   generation metrics come from an LLM judge, which has its own biases.
+- **No unanswerable questions.** Every benchmark question has an answer in the
+  paper, so the 0.8 distance gate (meant to reject off-topic questions) is
+  never exercised by the benchmark and was not tuned.
 - **Ask page uses Dense only.** It runs the dense pipeline. The other strategies
   can be explored on the Experiments page and in the benchmark.
 - **No OCR.** Scanned PDFs are rejected.
