@@ -311,6 +311,22 @@ class TestPipelineFailure:
         assert run.avg_overall_score is None
         assert run.avg_latency_ms is None
 
+    def test_generation_quota_returns_503(self, client, db_session):
+        from google.genai import errors as genai_errors
+
+        err = RuntimeError("LLM generation failed")
+        err.__cause__ = genai_errors.ClientError(
+            429, {"error": {"code": 429, "message": "quota, model: gemini-3.5-flash-lite", "status": "X"}}
+        )
+        with patch("app.routers.eval.judge_available", return_value=True), \
+             patch("app.routers.eval.run_pipeline", new_callable=AsyncMock) as pipe:
+            pipe.side_effect = err
+            resp = client.post("/api/eval/run", json=_PAYLOAD)
+
+        assert resp.status_code == 503
+        assert "gemini-3.5-flash-lite" in resp.json()["detail"]
+        assert db_session.query(EvalRun).one().status == "failed"
+
     def test_reranker_failure_propagates_as_failed_run(self, client, db_session):
         with patch("app.routers.eval.judge_available", return_value=True), \
              patch("app.routers.eval.run_pipeline", new_callable=AsyncMock) as pipe:
