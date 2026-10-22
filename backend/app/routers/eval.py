@@ -39,6 +39,7 @@ from sqlalchemy.orm import Session
 
 from app.auth import require_eval_api_key
 from app.benchmark import load_benchmark
+from app.config import JUDGE_MODEL, LLM_MODEL
 from app.database import SessionLocal, get_db
 from app.eval_generation import (
     ContextChunk,
@@ -49,6 +50,7 @@ from app.eval_generation import (
 )
 from app.eval_retrieval import score_retrieval
 from app.models import EvalResult, EvalRun, utcnow
+from app.quota import find_rate_limit, rate_limit_message
 from app.rag_pipelines import FINAL_TOP_K, PIPELINE_REGISTRY, PipelineResult
 
 logger = logging.getLogger("ragops.eval_router")
@@ -440,12 +442,21 @@ async def run_evaluation(payload: EvalRunRequest, db: Session = Depends(get_db))
             # Logged with traceback, recorded on the run, surfaced as an error.
             logger.exception("Pipeline failed during run %s (%s)", run.id, config.value)
             _mark_failed(db, run, exc)
+            rate_limited = find_rate_limit(exc)
+            if rate_limited:
+                raise HTTPException(status_code=503, detail=rate_limit_message(rate_limited)) from exc
             raise HTTPException(
                 status_code=502,
                 detail=f"RAG pipeline failed for config '{config.value}': {exc}",
             ) from exc
 
     return EvalRunResponse(runs=[_summary_from_run(r) for r in completed])
+
+
+@router.get("/models")
+def get_models():
+    """Which models generate answers and judge them, so results can be labelled."""
+    return {"generation": LLM_MODEL, "judge": JUDGE_MODEL}
 
 
 @router.get("/benchmark")

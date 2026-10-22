@@ -20,6 +20,7 @@ from app.services import (
     generate_summary_answer,
 )
 from app.config import NO_ANSWER_MESSAGE
+from app.quota import rate_limit_message
 from app.rag_pipeline import query_rag
 from app.reranker import warm_up as warm_up_reranker
 from app.utils import chunk_text
@@ -68,6 +69,17 @@ app.add_middleware(
 # Constants for File Validation
 MAX_FILE_SIZE_MB = 10
 ALLOWED_MIME_TYPES = ["application/pdf"]
+
+
+# Gemini rate limits and quotas are a temporary service condition, not a
+# server bug: report them as 503 with a readable reason, from any endpoint.
+@app.exception_handler(genai_errors.APIError)
+async def gemini_error_handler(request: Request, exc: genai_errors.APIError):
+    if exc.code == 429:
+        return JSONResponse(status_code=503, content={"detail": rate_limit_message(exc)})
+    return JSONResponse(
+        status_code=502, content={"detail": f"The Gemini API failed: {exc.message}"}
+    )
 
 
 # Global Exception Handler

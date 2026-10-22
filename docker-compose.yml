@@ -42,7 +42,8 @@ services:
       # Required: without it that endpoint stays closed (503).
       EVAL_API_KEY: ${EVAL_API_KEY:?EVAL_API_KEY must be set to enable evaluation runs}
       # Optional overrides, defaulted in app/config.py:
-      LLM_MODEL: ${LLM_MODEL:-gemini-3.6-flash}
+      LLM_MODEL: ${LLM_MODEL:-gemini-3.5-flash-lite}
+      GEMINI_JUDGE_MODEL: ${GEMINI_JUDGE_MODEL:-gemma-4-31b-it}
       EMBEDDING_MODEL: ${EMBEDDING_MODEL:-gemini-embedding-001}
       RAG_TOP_K: ${RAG_TOP_K:-5}
       RAG_MAX_DISTANCE: ${RAG_MAX_DISTANCE:-0.8}

@@ -27,6 +27,7 @@ from sqlalchemy.orm import Session
 from app.config import NO_ANSWER_MESSAGE, TOP_K
 from app.context import build_context, build_prompt
 from app.llm import generate_answer
+from app.quota import find_rate_limit
 from app.retrieval import RetrievedChunk, retrieve_chunks
 
 logger = logging.getLogger(__name__)
@@ -109,6 +110,10 @@ def query_rag(
             db, question, top_k=effective_top_k
         )
     except (RuntimeError, ValueError) as exc:
+        # A rate limit is not an answer; let the API report it as one (503).
+        rate_limited = find_rate_limit(exc)
+        if rate_limited:
+            raise rate_limited from exc
         logger.error("Retrieval failed for query %r: %s", question, exc)
         return RAGResult(
             answer=f"Retrieval error: {exc}",
@@ -134,6 +139,9 @@ def query_rag(
     try:
         answer = generate_answer(prompt)
     except (RuntimeError, ValueError) as exc:
+        rate_limited = find_rate_limit(exc)
+        if rate_limited:
+            raise rate_limited from exc
         logger.error("LLM generation failed for query %r: %s", question, exc)
         return RAGResult(
             answer=f"Generation error: {exc}",

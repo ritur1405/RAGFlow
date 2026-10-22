@@ -127,6 +127,32 @@ class TestQueryRag:
 
     @patch("app.rag_pipeline.generate_answer")
     @patch("app.rag_pipeline.retrieve_chunks")
+    def test_rate_limit_is_raised_not_returned_as_an_answer(self, mock_retrieve, mock_llm):
+        """A quota error must reach the API as an error, not as answer text."""
+        from google.genai import errors as genai_errors
+
+        quota = genai_errors.ClientError(429, {"error": {"code": 429, "message": "quota", "status": "X"}})
+        mock_retrieve.return_value = [_make_retrieved_chunk()]
+        mock_llm.side_effect = RuntimeError("LLM generation failed")
+        mock_llm.side_effect.__cause__ = quota
+
+        with pytest.raises(genai_errors.ClientError):
+            query_rag(MagicMock(), "query?")
+
+    @patch("app.rag_pipeline.retrieve_chunks")
+    def test_embedding_rate_limit_is_raised_too(self, mock_retrieve):
+        from google.genai import errors as genai_errors
+
+        quota = genai_errors.ClientError(429, {"error": {"code": 429, "message": "quota", "status": "X"}})
+        err = RuntimeError("Failed to generate query embedding")
+        err.__cause__ = quota
+        mock_retrieve.side_effect = err
+
+        with pytest.raises(genai_errors.ClientError):
+            query_rag(MagicMock(), "query?")
+
+    @patch("app.rag_pipeline.generate_answer")
+    @patch("app.rag_pipeline.retrieve_chunks")
     def test_custom_top_k(self, mock_retrieve, mock_llm):
         """Custom top_k should be forwarded to retrieve_chunks."""
         mock_retrieve.return_value = []
