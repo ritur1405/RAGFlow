@@ -84,7 +84,7 @@ To reproduce the benchmark below: upload
 
 ```bash
 pip install -r scripts/requirements.txt
-python scripts/run_benchmark.py            # --limit 2 for a quick smoke test
+python scripts/run_benchmark.py            # --questions 1-2 for a quick smoke test
 ```
 
 ## Benchmark results
@@ -108,12 +108,28 @@ The benchmark makes no generation calls and costs nothing on the free tier.
 
 ### Generation (LLM-judged)
 
-The full results (tables per configuration and per question type, plus
-charts) are written to [docs/benchmarks/results.md](docs/benchmarks/results.md)
-by `scripts/run_benchmark.py`. As currently designed, a full run makes about
-440 Gemini calls, while the free tier allows 20 generation requests per day for
-`gemini-3.6-flash`. The project stays on the free tier, so these results will
-be added once the run fits within that limit.
+All 22 questions, answered by `gemini-3.5-flash-lite` and scored 0–1 by
+`gemma-4-31b-it`. Latency is retrieval plus generation, excluding judging.
+
+| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Pipeline latency |
+|---|---:|---:|---:|---:|---:|---:|
+| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 1.36 s |
+| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | **1.30 s** |
+| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 1.38 s |
+| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 2.49 s |
+
+- **Hybrid + Cross-Encoder is the best configuration** (overall 0.882). Every
+  answer was grounded and every citation correct, for about 1.1 s more per
+  answer.
+- **Hybrid without reranking** is also fully grounded, but has the lowest
+  answer relevance (0.659). BM25's noisy candidates crowd out the useful ones,
+  matching its lower MRR in the retrieval table.
+- **Faithfulness is high everywhere** (≥ 0.955): the grounding prompt and the
+  distance gate keep answers to the retrieved context.
+
+The full run made 84 generation, 84 judge and 84 embedding requests, all on
+the free tier. Tables by question type and charts are in
+[docs/benchmarks/results.md](docs/benchmarks/results.md).
 
 How to read the numbers, and the analysis, are in [docs/REPORT.md](docs/REPORT.md#3-results).
 

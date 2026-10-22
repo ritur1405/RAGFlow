@@ -57,7 +57,38 @@ python scripts/run_benchmark.py
 It writes tables to [benchmarks/results.md](benchmarks/results.md) and charts
 to `docs/benchmarks/`, which the README's results section links to.
 
-**What to look for when reading them:**
+**Measured** (22 questions, generation `gemini-3.5-flash-lite`, judge
+`gemma-4-31b-it`, retrieval at K=3):
+
+| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Pipeline latency |
+|---|---:|---:|---:|---:|---:|---:|
+| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 1.36 s |
+| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | **1.30 s** |
+| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 1.38 s |
+| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 2.49 s |
+
+| Overall score by question type | Baseline | Dense | Hybrid | Hybrid + CE |
+|---|---:|---:|---:|---:|
+| factual (n=7) | 0.782 | 0.782 | 0.846 | **0.871** |
+| keyword (n=9) | **0.868** | **0.868** | 0.841 | 0.867 |
+| paraphrase (n=6) | **0.929** | 0.899 | 0.868 | 0.917 |
+
+**What the numbers showed**, against the expectations below:
+
+- **Reranking pays off.** Hybrid + Cross-Encoder is best overall and best on
+  factual questions, with perfect faithfulness and citation accuracy.
+- **BM25 did not help keyword questions.** The expectation was that keyword
+  questions favour BM25. Instead, hybrid scored lowest on them (0.841),
+  most likely because the `lower().split()` tokeniser keeps punctuation and
+  stopwords (see the retrieval benchmark). This is the Week 6 optimisation
+  target.
+- **Paraphrases favour dense retrieval**, as expected: Baseline leads (0.929)
+  and plain Hybrid trails (0.868).
+- **Latency.** Generation takes about 1.3 s for every configuration. The
+  cross-encoder added about 1.1 s per answer in this run, more than the 0.3 s
+  the retrieval benchmark measured for it; the difference wasn't isolated.
+
+**What was expected before the run:**
 
 - **By question type.** Keyword questions (exact names and numbers, such as
   "k=0.9, b=0.4" or "Hole@10") should favour configurations that include BM25.
@@ -145,18 +176,16 @@ One call scores all four metrics, each against its own rubric.
   default score. Citation accuracy adds a deterministic check: citing a chunk
   that was never retrieved caps the score at 0.2.
 
-**What latency/quality trade-off appeared?** The answer comes from the
-quality-vs-latency chart. Structurally:
+**What latency/quality trade-off appeared?** Generation (about 1.3 s) dominates
+dense and hybrid, which differ by under 0.1 s. The cross-encoder is the one
+real cost: about 1.1 s more per answer for the best quality (0.882 vs 0.850
+overall for hybrid). The quality-vs-latency chart in `benchmarks/` shows this.
 
-- BM25 is roughly 20× faster than dense, because it needs no embedding call.
-- Hybrid costs about the same as dense, since the embedding call dominates.
-- The cross-encoder adds little on a small pool.
-- In this setup, generation dwarfs every retrieval cost.
-
-**Which configuration performed best and why?** See
-[benchmarks/results.md](benchmarks/results.md). The question-type breakdown
-explains *why*: compare each configuration's nDCG on keyword versus
-paraphrased questions.
+**Which configuration performed best and why?** Hybrid + Cross-Encoder,
+at 0.882 overall with perfect faithfulness and citation accuracy. Hybrid
+retrieval widens the candidate pool, and the cross-encoder, which reads the
+question and chunk together, puts the relevant chunk first. Without the
+reranker, BM25's noise lowers answer relevance to 0.659.
 
 ## 6. Engineering decisions worth mentioning
 
