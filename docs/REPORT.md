@@ -60,12 +60,18 @@ to `docs/benchmarks/`, which the README's results section links to.
 **Measured** (22 questions, generation `gemini-3.5-flash-lite`, judge
 `gemma-4-31b-it`, retrieval at K=3):
 
-| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Pipeline latency |
-|---|---:|---:|---:|---:|---:|---:|
-| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 1.36 s |
-| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | **1.30 s** |
-| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 1.38 s |
-| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 2.49 s |
+| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Refusals | Pipeline latency |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 4 | 1.36 s |
+| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | 5 | **1.30 s** |
+| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 7 | 1.38 s |
+| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 5 | 2.49 s |
+
+*Refusals* are the answer "I cannot find relevant information in the provided
+documents.", given when retrieval finds nothing close enough or the retrieved
+context doesn't contain the answer. The judge scores a refusal 1.0 for
+faithfulness and citation accuracy and 0.0 for answer relevance, so refusals
+drive most of the differences between configurations.
 
 | Overall score by question type | Baseline | Dense | Hybrid | Hybrid + CE |
 |---|---:|---:|---:|---:|
@@ -76,7 +82,11 @@ to `docs/benchmarks/`, which the README's results section links to.
 **What the numbers showed**, against the expectations below:
 
 - **Reranking pays off.** Hybrid + Cross-Encoder is best overall and best on
-  factual questions, with perfect faithfulness and citation accuracy.
+  factual questions. All 17 of its non-refusal answers were fully grounded
+  with correct citations.
+- **Refusals separate the configurations.** Plain Hybrid refused 7 of 22
+  questions, against 4–5 for the others, which explains its 0.659 answer
+  relevance.
 - **BM25 did not help keyword questions.** The expectation was that keyword
   questions favour BM25. Instead, hybrid scored lowest on them (0.841),
   most likely because the `lower().split()` tokeniser keeps punctuation and
@@ -182,10 +192,11 @@ real cost: about 1.1 s more per answer for the best quality (0.882 vs 0.850
 overall for hybrid). The quality-vs-latency chart in `benchmarks/` shows this.
 
 **Which configuration performed best and why?** Hybrid + Cross-Encoder,
-at 0.882 overall with perfect faithfulness and citation accuracy. Hybrid
+at 0.882 overall, with every non-refusal answer fully grounded. Hybrid
 retrieval widens the candidate pool, and the cross-encoder, which reads the
 question and chunk together, puts the relevant chunk first. Without the
-reranker, BM25's noise lowers answer relevance to 0.659.
+reranker, plain Hybrid refuses 7 of 22 questions and its answer relevance
+drops to 0.659.
 
 ## 6. Engineering decisions worth mentioning
 

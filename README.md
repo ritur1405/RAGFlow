@@ -111,24 +111,31 @@ The benchmark makes no generation calls and costs nothing on the free tier.
 All 22 questions, answered by `gemini-3.5-flash-lite` and scored 0–1 by
 `gemma-4-31b-it`. Latency is retrieval plus generation, excluding judging.
 
-| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Pipeline latency |
-|---|---:|---:|---:|---:|---:|---:|
-| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 1.36 s |
-| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | **1.30 s** |
-| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 1.38 s |
-| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 2.49 s |
+| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Refusals | Pipeline latency |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 4 | 1.36 s |
+| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | 5 | **1.30 s** |
+| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 7 | 1.38 s |
+| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 5 | 2.49 s |
 
-- **Hybrid + Cross-Encoder is the best configuration** (overall 0.882). Every
-  answer was grounded and every citation correct, for about 1.1 s more per
-  answer.
-- **Hybrid without reranking** is also fully grounded, but has the lowest
-  answer relevance (0.659). BM25's noisy candidates crowd out the useful ones,
-  matching its lower MRR in the retrieval table.
-- **Faithfulness is high everywhere** (≥ 0.955): the grounding prompt and the
-  distance gate keep answers to the retrieved context.
+*Refusals* are the answer "I cannot find relevant information in the provided
+documents.", given when retrieval finds nothing close enough or the retrieved
+context doesn't contain the answer. The judge scores a refusal 1.0 for
+faithfulness and citation accuracy and 0.0 for answer relevance, so refusals
+drive most of the differences between configurations.
 
-The full run made 84 generation, 84 judge and 84 embedding requests, all on
-the free tier. Tables by question type and charts are in
+- **Hybrid + Cross-Encoder is the best configuration** (overall 0.882). All 17
+  of its non-refusal answers were judged fully grounded with correct
+  citations, for about 1.1 s more per answer.
+- **Hybrid without reranking refuses most often** (7 of 22), which gives it
+  the lowest answer relevance (0.659). Its 15 actual answers score 0.967.
+- **On the questions they answer**, Baseline and Dense score 1.000 answer
+  relevance but about 0.94 faithfulness: a few claims went beyond the
+  context.
+
+The full run made 88 generation and 88 judge requests (22 questions × 4
+configurations), all on the free tier. It ran before query embeddings were
+cached, so it also made 88 embedding requests; a run now makes 22. Tables by question type and charts are in
 [docs/benchmarks/results.md](docs/benchmarks/results.md).
 
 How to read the numbers, and the analysis, are in [docs/REPORT.md](docs/REPORT.md#3-results).
@@ -284,8 +291,8 @@ on Gemini's free tier, with no billing. Limits are per model:
   24-page upload exceeds the embedding limit and takes about 1.5 minutes.
 - **Daily limits** fail immediately with a **503** that names the model, from
   every endpoint, including Ask.
-- **The full benchmark** is 88 generation, 88 judge and 88 embedding
-  requests, within one day's allowance.
+- **The full benchmark** is 88 generation, 88 judge and 22 embedding
+  requests (query embeddings are cached), within one day's allowance.
 - **The runner refuses** any run that would exceed `--max-calls-per-model`,
   and saves progress. A run cut short by a quota continues where it stopped:
 
