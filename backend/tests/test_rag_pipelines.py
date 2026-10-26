@@ -118,6 +118,17 @@ class TestBm25AndFusion:
         assert [d.id for d in ranked] == [3, 1]  # doc 2 scores 0 and is excluded
         assert all(isinstance(d, Document) for d in ranked)
 
+    def test_bm25_ignores_punctuation_and_stopwords(self):
+        rows = [
+            _row(1, "Results for BM25, compared with dense retrieval."),
+            _row(2, "What is the role of the reader? It is the one that answers."),
+            _row(3, "a list of unrelated words"),
+        ]
+        ranked = rp._bm25_rank(rows, "What is BM25?", top_k=5)
+
+        # "BM25," and "BM25?" match; "what" and "is" do not pull in doc 2.
+        assert [d.id for d in ranked] == [1]
+
     def test_bm25_empty_corpus(self):
         assert rp._bm25_rank([], "anything", top_k=5) == []
 

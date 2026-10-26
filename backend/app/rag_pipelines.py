@@ -30,6 +30,7 @@ then be filed under a label that does not describe them.
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from contextlib import contextmanager
@@ -57,6 +58,8 @@ logger = logging.getLogger("ragops.rag_pipelines")
 RERANK_CANDIDATE_POOL = 8
 # Chunks actually handed to the generator.
 FINAL_TOP_K = 3
+# Reciprocal Rank Fusion constant: higher flattens the gap between ranks.
+RRF_K = 60
 
 # Ranked (Document, score) pairs, best first. What the score means depends on
 # the retriever; see RETRIEVER_SCORE_LABELS.
@@ -227,12 +230,27 @@ def _load_all_documents(db: Session) -> List[Document]:
     )
 
 
+# Common English function words. Without this, a question's "what", "is" and
+# "the" match nearly every chunk and drown out its real keywords.
+_STOPWORDS = frozenset(
+    "a an and are as at be by can do does for from has have how in is it its of on "
+    "or that the their them they this to was were what when where which who why "
+    "with".split()
+)
+_TOKEN = re.compile(r"[a-z0-9]+")
+
+
+def _tokenize(text: str) -> List[str]:
+    """Lowercase alphanumeric words minus stopwords, so "BM25," matches "bm25"."""
+    return [t for t in _TOKEN.findall(text.lower()) if t not in _STOPWORDS]
+
+
 def _bm25_scored(rows, question: str, top_k: int) -> Ranked:
     if not rows:
         return []
-    tokenized_corpus = [row.content.lower().split() for row in rows]
+    tokenized_corpus = [_tokenize(row.content) for row in rows]
     bm25 = BM25Okapi(tokenized_corpus)
-    scores = bm25.get_scores(question.lower().split())
+    scores = bm25.get_scores(_tokenize(question))
     ranked = sorted(zip(rows, scores), key=lambda pair: pair[1], reverse=True)
     # Detached Document instances: read-only carriers, never added to a session.
     return [
@@ -266,7 +284,7 @@ def retrieve_bm25(db: Session, question: str, top_k: int = FINAL_TOP_K) -> Ranke
 # --------------------------------------------------------------------------
 
 
-def _rrf_scored(ranked_lists: List[List[Document]], top_k: int, k: int = 60) -> Ranked:
+def _rrf_scored(ranked_lists: List[List[Document]], top_k: int, k: int = RRF_K) -> Ranked:
     """Standard RRF: score = sum over lists of 1 / (k + rank)."""
     fused_scores: Dict[int, float] = {}
     doc_lookup: Dict[int, Document] = {}
@@ -281,7 +299,7 @@ def _rrf_scored(ranked_lists: List[List[Document]], top_k: int, k: int = 60) -> 
 
 
 def _reciprocal_rank_fusion(
-    ranked_lists: List[List[Document]], top_k: int, k: int = 60
+    ranked_lists: List[List[Document]], top_k: int, k: int = RRF_K
 ) -> List[Document]:
     return _docs(_rrf_scored(ranked_lists, top_k=top_k, k=k))
 
@@ -291,7 +309,7 @@ def retrieve_hybrid(db: Session, question: str, top_k: int = FINAL_TOP_K) -> Ran
     pool = max(RERANK_CANDIDATE_POOL, top_k)
     dense_ranked = [doc for doc, _dist in _dense_candidates(db, question, pool)]
     bm25_ranked = _bm25_rank(_load_all_documents(db), question, top_k=pool)
-    return _rrf_scored([dense_ranked, bm25_ranked], top_k=top_k)
+    return _rrf_scored([dense_ranked, bm25_ranked], top_k=top_k, k=RRF_K)
 
 
 def _hybrid_candidates(db: Session, question: str, top_k: int) -> List[Document]:

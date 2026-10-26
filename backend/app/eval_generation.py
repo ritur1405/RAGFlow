@@ -317,6 +317,10 @@ async def _call_judge(prompt: str) -> tuple[dict[str, tuple[float, str]], dict, 
                     f"Gemini daily quota exhausted for the judge model "
                     f"({GEMINI_JUDGE_MODEL}): {exc.message}"
                 ) from exc
+            if isinstance(exc, genai_errors.APIError):
+                # The shared client already retried 429s and 5xx; retrying here
+                # would multiply those requests against the same quota.
+                raise JudgeCallError(f"Judge call failed: {exc}") from exc
             last_error = exc
             logger.warning(
                 "Judge call failed (attempt %d/%d): %s", attempt, _MAX_RETRIES, exc

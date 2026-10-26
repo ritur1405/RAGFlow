@@ -14,7 +14,7 @@ cloud-specific service is required.
 ## 1. Prepare a server
 
 Any VM with about 2 vCPU and 4 GB RAM is enough: the backend image is roughly
-1.4 GB, and the reranker runs on CPU. Install Docker Engine with the compose
+1.3 GB, and the reranker runs on CPU. Install Docker Engine with the compose
 plugin, then:
 
 ```bash
@@ -36,18 +36,25 @@ EVAL_API_KEY=$(openssl rand -hex 32)   # required to run evaluations
   Without it, that endpoint refuses every call with 503.
 - Read endpoints stay open so the dashboard can show results without a secret
   in the browser.
-- For anything beyond a demo, also change the Postgres password in
-  `docker-compose.yml` (`POSTGRES_PASSWORD` and the matching `DATABASE_URL`).
+- Set `POSTGRES_PASSWORD` in `.env` before the first start (URL-safe
+  characters only). Compose passes it to both Postgres and the backend. It
+  only applies when the database volume is created; to change it later, run
+  `docker compose exec db psql -U postgres -c "ALTER USER postgres PASSWORD 'new'"`,
+  then update `.env` and `docker compose up -d`.
 
-## 3. Expose only the web app
+## 3. Ports
 
-In `docker-compose.yml`, for a public server:
+Only the web app is public by default; no compose edits are needed:
 
-- remove the `ports:` mapping of `db` (5432), so Postgres is reachable only on
-  the compose network
-- optionally remove `backend`'s `8000:8000`, since nginx in `frontend` already
-  proxies `/api`, `/query`, `/upload` and `/documents` to it
-- change `frontend`'s mapping to `80:80`, or keep `5173:80` behind a reverse proxy
+| Service | Published on | Why |
+|---|---|---|
+| `frontend` | `0.0.0.0:${WEB_PORT:-5173}` | The site. nginx in it proxies `/api`, `/query`, `/upload` and `/documents` to the backend |
+| `backend` | `127.0.0.1:8000` | Swagger docs and `scripts/` on the server itself; never reachable from the network |
+| `db` | `127.0.0.1:5432` | `psql` and backups on the server itself |
+
+Set `WEB_PORT=80` in `.env` when nothing else serves port 80, or keep the
+default behind a TLS reverse proxy (step 5). Every service restarts
+automatically after a crash or a reboot (`restart: unless-stopped`).
 
 ## 4. Build and start
 

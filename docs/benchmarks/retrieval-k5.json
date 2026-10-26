@@ -1,1 +1,2360 @@
-{"batch_id":"20b28349-39a9-45bd-b3ef-a1e3ad571b3f","dataset_name":"beir-paper-v1","k":5,"num_questions":22,"embedding":{"calls_made":0,"reused":22,"avg_latency_ms":null},"results":[{"run_id":"b90a7782-bf27-4862-82a9-5f7e3b93939d","strategy":"baseline","label":"Baseline (dense, no gate)","status":"completed","error_message":null,"k":5,"num_questions":22,"avg_precision_at_k":0.5454545454545454,"avg_recall_at_k":0.9015151515151516,"avg_mrr":0.893939393939394,"avg_ndcg_at_k":0.6006994035643833,"avg_latency_ms":5.195429181846769,"by_type":{"factual":{"n":7,"precision_at_k":0.5428571428571428,"recall_at_k":0.8571428571428571,"reciprocal_rank":0.8333333333333333,"ndcg_at_k":0.5638493367769347},"keyword":{"n":9,"precision_at_k":0.5555555555555556,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6512626000902724},"paraphrase":{"n":6,"precision_at_k":0.5333333333333333,"recall_at_k":0.8055555555555557,"reciprocal_rank":0.8055555555555557,"ndcg_at_k":0.5678463533609063}},"created_at":"2026-10-21T18:17:14.653286Z"},{"run_id":"9deaa9a3-e56d-4d5b-a6a1-6a50e012acad","strategy":"dense","label":"Dense","status":"completed","error_message":null,"k":5,"num_questions":22,"avg_precision_at_k":0.5454545454545454,"avg_recall_at_k":0.9015151515151516,"avg_mrr":0.893939393939394,"avg_ndcg_at_k":0.6006994035643833,"avg_latency_ms":6.920308772764243,"by_type":{"factual":{"n":7,"precision_at_k":0.5428571428571428,"recall_at_k":0.8571428571428571,"reciprocal_rank":0.8333333333333333,"ndcg_at_k":0.5638493367769347},"keyword":{"n":9,"precision_at_k":0.5555555555555556,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6512626000902724},"paraphrase":{"n":6,"precision_at_k":0.5333333333333333,"recall_at_k":0.8055555555555557,"reciprocal_rank":0.8055555555555557,"ndcg_at_k":0.5678463533609063}},"created_at":"2026-10-21T18:17:14.820665Z"},{"run_id":"7bd7c5e9-5a2a-4c0a-b665-88e59f23e47b","strategy":"bm25","label":"BM25","status":"completed","error_message":null,"k":5,"num_questions":22,"avg_precision_at_k":0.26363636363636367,"avg_recall_at_k":0.6969696969696969,"avg_mrr":0.5598484848484849,"avg_ndcg_at_k":0.2943538011209227,"avg_latency_ms":23.35741813637717,"by_type":{"factual":{"n":7,"precision_at_k":0.2857142857142857,"recall_at_k":0.8095238095238094,"reciprocal_rank":0.5761904761904761,"ndcg_at_k":0.3057196018384933},"keyword":{"n":9,"precision_at_k":0.2222222222222222,"recall_at_k":0.6111111111111112,"reciprocal_rank":0.5833333333333334,"ndcg_at_k":0.28234268845129296},"paraphrase":{"n":6,"precision_at_k":0.3,"recall_at_k":0.6944444444444443,"reciprocal_rank":0.5055555555555555,"ndcg_at_k":0.29911036928820156}},"created_at":"2026-10-21T18:17:15.005926Z"},{"run_id":"556d1b43-0e53-4482-a874-db2bff5c256d","strategy":"hybrid","label":"Hybrid (RRF)","status":"completed","error_message":null,"k":5,"num_questions":22,"avg_precision_at_k":0.4636363636363636,"avg_recall_at_k":0.9242424242424243,"avg_mrr":0.8234848484848485,"avg_ndcg_at_k":0.5214992206934725,"avg_latency_ms":32.33634504547147,"by_type":{"factual":{"n":7,"precision_at_k":0.48571428571428577,"recall_at_k":0.8571428571428571,"reciprocal_rank":0.719047619047619,"ndcg_at_k":0.5227770585749187},"keyword":{"n":9,"precision_at_k":0.4444444444444444,"recall_at_k":1.0,"reciprocal_rank":0.9259259259259258,"ndcg_at_k":0.5286319782540719},"paraphrase":{"n":6,"precision_at_k":0.4666666666666666,"recall_at_k":0.888888888888889,"reciprocal_rank":0.7916666666666666,"ndcg_at_k":0.5093092734908858}},"created_at":"2026-10-21T18:17:15.532085Z"},{"run_id":"f22527bf-b888-44b3-ad21-e31f25bc909e","strategy":"hybrid_reranker","label":"Hybrid + Cross-Encoder","status":"completed","error_message":null,"k":5,"num_questions":22,"avg_precision_at_k":0.5454545454545454,"avg_recall_at_k":0.9393939393939393,"avg_mrr":0.8787878787878789,"avg_ndcg_at_k":0.5923156137931482,"avg_latency_ms":431.8543309091183,"by_type":{"factual":{"n":7,"precision_at_k":0.5428571428571428,"recall_at_k":0.8571428571428571,"reciprocal_rank":0.8333333333333333,"ndcg_at_k":0.583254455317455},"keyword":{"n":9,"precision_at_k":0.5555555555555556,"recall_at_k":1.0,"reciprocal_rank":0.8888888888888888,"ndcg_at_k":0.6076627664537784},"paraphrase":{"n":6,"precision_at_k":0.5333333333333333,"recall_at_k":0.9444444444444443,"reciprocal_rank":0.9166666666666666,"ndcg_at_k":0.5798662363571783}},"created_at":"2026-10-21T18:17:16.257994Z"}],"per_question":{"baseline":[{"question":"How many datasets and how many retrieval tasks does BEIR include?","type":"factual","relevant_pages":[1,2,3],"retrieved_pages":[4,2,9,2,2],"latency_ms":20.96,"precision_at_k":0.6,"recall_at_k":0.3333,"reciprocal_rank":0.5,"ndcg_at_k":0.4913},{"question":"Which retrieval architecture achieved the best zero-shot performance on BEIR?","type":"factual","relevant_pages":[1,7,8],"retrieved_pages":[1,9,3,7,6],"latency_ms":3.66,"precision_at_k":0.4,"recall_at_k":0.6667,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"What k and b parameters were used for Anserini BM25?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,6,6,21,6],"latency_ms":3.57,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"Which single evaluation metric does BEIR report for every dataset, and at what cutoff?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,5,5,5,2],"latency_ms":3.56,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?","type":"paraphrase","relevant_pages":[5],"retrieved_pages":[5,5,3,9,3],"latency_ms":4.0,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5531},{"question":"How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,8,7,24,5],"latency_ms":3.9,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"How slow is BM25+CE per query on 1 million DBPedia documents?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,8,8,8,8],"latency_ms":3.49,"precision_at_k":1.0,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":1.0},{"question":"How much storage does a ColBERT index need compared with BM25?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,7,6,8,13],"latency_ms":2.95,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"Why can a keyword-based search engine miss relevant documents that use different wording from the query?","type":"paraphrase","relevant_pages":[1,3],"retrieved_pages":[7,1,3,6,3],"latency_ms":2.96,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":0.5,"ndcg_at_k":0.5148},{"question":"What does Hole@10 measure, and what values did BM25 and TAS-B get?","type":"keyword","relevant_pages":[9],"retrieved_pages":[9,9,9,9,21],"latency_ms":3.66,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?","type":"factual","relevant_pages":[9],"retrieved_pages":[9,9,21,9,7],"latency_ms":3.65,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"Which BEIR dataset has the longest queries?","type":"factual","relevant_pages":[4],"retrieved_pages":[2,3,4,17,4],"latency_ms":3.65,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":0.3333,"ndcg_at_k":0.3008},{"question":"What nDCG@10 did BM25 and BM25+CE get on SciFact?","type":"keyword","relevant_pages":[7],"retrieved_pages":[7,9,24,8,7],"latency_ms":3.25,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4704},{"question":"Why do some dense retrievers favour short documents while others favour long ones?","type":"paraphrase","relevant_pages":[7,21],"retrieved_pages":[21,21,21,8,21],"latency_ms":4.13,"precision_at_k":0.8,"recall_at_k":0.5,"reciprocal_rank":1.0,"ndcg_at_k":0.8539},{"question":"How does docT5query expand a document?","type":"keyword","relevant_pages":[3,6],"retrieved_pages":[6,6,7,3,13],"latency_ms":5.65,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"What negatives was DPR trained with, and on which datasets was the Multi model trained?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,6,21,22,6],"latency_ms":3.93,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6844},{"question":"Does doing well on MS MARCO tell you a model will do well on unseen domains?","type":"paraphrase","relevant_pages":[2,6,9],"retrieved_pages":[17,17,6,7,1],"latency_ms":3.89,"precision_at_k":0.2,"recall_at_k":0.3333,"reciprocal_rank":0.3333,"ndcg_at_k":0.1696},{"question":"How did the authors quantify how similar the domains of two datasets are?","type":"paraphrase","relevant_pages":[4,20],"retrieved_pages":[4,20,5,4,4],"latency_ms":3.56,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8304},{"question":"What is capped recall and why is it needed?","type":"keyword","relevant_pages":[20,21],"retrieved_pages":[21,20,20,17,23],"latency_ms":3.58,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.7227},{"question":"What limitations of the benchmark do the authors acknowledge?","type":"paraphrase","relevant_pages":[17],"retrieved_pages":[17,3,16,17,16],"latency_ms":3.04,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"On which datasets did the cross-encoder re-ranker fail to beat BM25?","type":"factual","relevant_pages":[7],"retrieved_pages":[7,6,9,7,24],"latency_ms":6.76,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"What hardware was used to measure retrieval latency?","type":"keyword","relevant_pages":[8],"retrieved_pages":[8,8,8,8,5],"latency_ms":16.48,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688}],"dense":[{"question":"How many datasets and how many retrieval tasks does BEIR include?","type":"factual","relevant_pages":[1,2,3],"retrieved_pages":[4,2,9,2,2],"latency_ms":9.72,"precision_at_k":0.6,"recall_at_k":0.3333,"reciprocal_rank":0.5,"ndcg_at_k":0.4913},{"question":"Which retrieval architecture achieved the best zero-shot performance on BEIR?","type":"factual","relevant_pages":[1,7,8],"retrieved_pages":[1,9,3,7,6],"latency_ms":5.19,"precision_at_k":0.4,"recall_at_k":0.6667,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"What k and b parameters were used for Anserini BM25?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,6,6,21,6],"latency_ms":5.16,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"Which single evaluation metric does BEIR report for every dataset, and at what cutoff?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,5,5,5,2],"latency_ms":5.6,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?","type":"paraphrase","relevant_pages":[5],"retrieved_pages":[5,5,3,9,3],"latency_ms":6.15,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5531},{"question":"How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,8,7,24,5],"latency_ms":4.75,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"How slow is BM25+CE per query on 1 million DBPedia documents?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,8,8,8,8],"latency_ms":6.76,"precision_at_k":1.0,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":1.0},{"question":"How much storage does a ColBERT index need compared with BM25?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,7,6,8,13],"latency_ms":7.1,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"Why can a keyword-based search engine miss relevant documents that use different wording from the query?","type":"paraphrase","relevant_pages":[1,3],"retrieved_pages":[7,1,3,6,3],"latency_ms":4.76,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":0.5,"ndcg_at_k":0.5148},{"question":"What does Hole@10 measure, and what values did BM25 and TAS-B get?","type":"keyword","relevant_pages":[9],"retrieved_pages":[9,9,9,9,21],"latency_ms":4.98,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?","type":"factual","relevant_pages":[9],"retrieved_pages":[9,9,21,9,7],"latency_ms":4.67,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"Which BEIR dataset has the longest queries?","type":"factual","relevant_pages":[4],"retrieved_pages":[2,3,4,17,4],"latency_ms":4.82,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":0.3333,"ndcg_at_k":0.3008},{"question":"What nDCG@10 did BM25 and BM25+CE get on SciFact?","type":"keyword","relevant_pages":[7],"retrieved_pages":[7,9,24,8,7],"latency_ms":3.86,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4704},{"question":"Why do some dense retrievers favour short documents while others favour long ones?","type":"paraphrase","relevant_pages":[7,21],"retrieved_pages":[21,21,21,8,21],"latency_ms":5.09,"precision_at_k":0.8,"recall_at_k":0.5,"reciprocal_rank":1.0,"ndcg_at_k":0.8539},{"question":"How does docT5query expand a document?","type":"keyword","relevant_pages":[3,6],"retrieved_pages":[6,6,7,3,13],"latency_ms":9.18,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"What negatives was DPR trained with, and on which datasets was the Multi model trained?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,6,21,22,6],"latency_ms":4.58,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6844},{"question":"Does doing well on MS MARCO tell you a model will do well on unseen domains?","type":"paraphrase","relevant_pages":[2,6,9],"retrieved_pages":[17,17,6,7,1],"latency_ms":5.57,"precision_at_k":0.2,"recall_at_k":0.3333,"reciprocal_rank":0.3333,"ndcg_at_k":0.1696},{"question":"How did the authors quantify how similar the domains of two datasets are?","type":"paraphrase","relevant_pages":[4,20],"retrieved_pages":[4,20,5,4,4],"latency_ms":3.23,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8304},{"question":"What is capped recall and why is it needed?","type":"keyword","relevant_pages":[20,21],"retrieved_pages":[21,20,20,17,23],"latency_ms":16.74,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.7227},{"question":"What limitations of the benchmark do the authors acknowledge?","type":"paraphrase","relevant_pages":[17],"retrieved_pages":[17,3,16,17,16],"latency_ms":6.03,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"On which datasets did the cross-encoder re-ranker fail to beat BM25?","type":"factual","relevant_pages":[7],"retrieved_pages":[7,6,9,7,24],"latency_ms":12.39,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"What hardware was used to measure retrieval latency?","type":"keyword","relevant_pages":[8],"retrieved_pages":[8,8,8,8,5],"latency_ms":15.91,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688}],"bm25":[{"question":"How many datasets and how many retrieval tasks does BEIR include?","type":"factual","relevant_pages":[1,2,3],"retrieved_pages":[9,23,6,2,23],"latency_ms":91.06,"precision_at_k":0.2,"recall_at_k":0.3333,"reciprocal_rank":0.25,"ndcg_at_k":0.1461},{"question":"Which retrieval architecture achieved the best zero-shot performance on BEIR?","type":"factual","relevant_pages":[1,7,8],"retrieved_pages":[24,3,3,9,7],"latency_ms":24.7,"precision_at_k":0.2,"recall_at_k":0.3333,"reciprocal_rank":0.2,"ndcg_at_k":0.1312},{"question":"What k and b parameters were used for Anserini BM25?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,17,23,6,20],"latency_ms":28.78,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"Which single evaluation metric does BEIR report for every dataset, and at what cutoff?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,17,17,3,3],"latency_ms":23.5,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?","type":"paraphrase","relevant_pages":[5],"retrieved_pages":[4,16,6,16,5],"latency_ms":20.02,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":0.2,"ndcg_at_k":0.1312},{"question":"How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?","type":"keyword","relevant_pages":[6],"retrieved_pages":[23,23,23,6,8],"latency_ms":22.94,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":0.25,"ndcg_at_k":0.1461},{"question":"How slow is BM25+CE per query on 1 million DBPedia documents?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,2,2,4,23],"latency_ms":16.5,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"How much storage does a ColBERT index need compared with BM25?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,8,23,8,23],"latency_ms":15.98,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"Why can a keyword-based search engine miss relevant documents that use different wording from the query?","type":"paraphrase","relevant_pages":[1,3],"retrieved_pages":[3,20,17,20,18],"latency_ms":18.55,"precision_at_k":0.2,"recall_at_k":0.5,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"What does Hole@10 measure, and what values did BM25 and TAS-B get?","type":"keyword","relevant_pages":[9],"retrieved_pages":[9,23,9,23,23],"latency_ms":26.01,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5087},{"question":"After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?","type":"factual","relevant_pages":[9],"retrieved_pages":[9,16,9,2,16],"latency_ms":18.59,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5087},{"question":"Which BEIR dataset has the longest queries?","type":"factual","relevant_pages":[4],"retrieved_pages":[17,8,17,4,3],"latency_ms":17.27,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":0.25,"ndcg_at_k":0.1461},{"question":"What nDCG@10 did BM25 and BM25+CE get on SciFact?","type":"keyword","relevant_pages":[7],"retrieved_pages":[9,8,8,16,16],"latency_ms":22.9,"precision_at_k":0.0,"recall_at_k":0.0,"reciprocal_rank":0.0,"ndcg_at_k":0.0},{"question":"Why do some dense retrievers favour short documents while others favour long ones?","type":"paraphrase","relevant_pages":[7,21],"retrieved_pages":[3,4,7,3,21],"latency_ms":18.84,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":0.3333,"ndcg_at_k":0.3008},{"question":"How does docT5query expand a document?","type":"keyword","relevant_pages":[3,6],"retrieved_pages":[23,23,23,13,2],"latency_ms":16.43,"precision_at_k":0.0,"recall_at_k":0.0,"reciprocal_rank":0.0,"ndcg_at_k":0.0},{"question":"What negatives was DPR trained with, and on which datasets was the Multi model trained?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,6,6,6,23],"latency_ms":19.77,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"Does doing well on MS MARCO tell you a model will do well on unseen domains?","type":"paraphrase","relevant_pages":[2,6,9],"retrieved_pages":[9,7,2,7,2],"latency_ms":17.32,"precision_at_k":0.6,"recall_at_k":0.6667,"reciprocal_rank":1.0,"ndcg_at_k":0.6399},{"question":"How did the authors quantify how similar the domains of two datasets are?","type":"paraphrase","relevant_pages":[4,20],"retrieved_pages":[16,16,16,16,23],"latency_ms":18.04,"precision_at_k":0.0,"recall_at_k":0.0,"reciprocal_rank":0.0,"ndcg_at_k":0.0},{"question":"What is capped recall and why is it needed?","type":"keyword","relevant_pages":[20,21],"retrieved_pages":[20,2,17,23,5],"latency_ms":15.88,"precision_at_k":0.2,"recall_at_k":0.5,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"What limitations of the benchmark do the authors acknowledge?","type":"paraphrase","relevant_pages":[17],"retrieved_pages":[16,17,17,20,10],"latency_ms":17.35,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":0.5,"ndcg_at_k":0.3836},{"question":"On which datasets did the cross-encoder re-ranker fail to beat BM25?","type":"factual","relevant_pages":[7],"retrieved_pages":[16,16,7,16,3],"latency_ms":20.89,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":0.3333,"ndcg_at_k":0.1696},{"question":"What hardware was used to measure retrieval latency?","type":"keyword","relevant_pages":[8],"retrieved_pages":[23,16,16,9,4],"latency_ms":22.54,"precision_at_k":0.0,"recall_at_k":0.0,"reciprocal_rank":0.0,"ndcg_at_k":0.0}],"hybrid":[{"question":"How many datasets and how many retrieval tasks does BEIR include?","type":"factual","relevant_pages":[1,2,3],"retrieved_pages":[9,2,4,4,9],"latency_ms":24.89,"precision_at_k":0.2,"recall_at_k":0.3333,"reciprocal_rank":0.5,"ndcg_at_k":0.214},{"question":"Which retrieval architecture achieved the best zero-shot performance on BEIR?","type":"factual","relevant_pages":[1,7,8],"retrieved_pages":[3,9,7,1,24],"latency_ms":35.62,"precision_at_k":0.4,"recall_at_k":0.6667,"reciprocal_rank":0.3333,"ndcg_at_k":0.3156},{"question":"What k and b parameters were used for Anserini BM25?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,6,6,17,6],"latency_ms":31.79,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"Which single evaluation metric does BEIR report for every dataset, and at what cutoff?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,17,5,5,17],"latency_ms":35.07,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6548},{"question":"Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?","type":"paraphrase","relevant_pages":[5],"retrieved_pages":[5,4,5,16,3],"latency_ms":35.02,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5087},{"question":"How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,23,8,23,7],"latency_ms":36.3,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"How slow is BM25+CE per query on 1 million DBPedia documents?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,8,8,8,2],"latency_ms":25.02,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"How much storage does a ColBERT index need compared with BM25?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,8,8,7,8],"latency_ms":27.52,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8539},{"question":"Why can a keyword-based search engine miss relevant documents that use different wording from the query?","type":"paraphrase","relevant_pages":[1,3],"retrieved_pages":[7,3,1,20,3],"latency_ms":30.78,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":0.5,"ndcg_at_k":0.5148},{"question":"What does Hole@10 measure, and what values did BM25 and TAS-B get?","type":"keyword","relevant_pages":[9],"retrieved_pages":[9,9,8,23,9],"latency_ms":29.68,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6844},{"question":"After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?","type":"factual","relevant_pages":[9],"retrieved_pages":[9,9,9,16,21],"latency_ms":34.44,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.7227},{"question":"Which BEIR dataset has the longest queries?","type":"factual","relevant_pages":[4],"retrieved_pages":[2,17,3,8,4],"latency_ms":33.73,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":0.2,"ndcg_at_k":0.1312},{"question":"What nDCG@10 did BM25 and BM25+CE get on SciFact?","type":"keyword","relevant_pages":[7],"retrieved_pages":[9,8,7,24,8],"latency_ms":32.37,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":0.3333,"ndcg_at_k":0.1696},{"question":"Why do some dense retrievers favour short documents while others favour long ones?","type":"paraphrase","relevant_pages":[7,21],"retrieved_pages":[21,21,7,21,3],"latency_ms":35.42,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"How does docT5query expand a document?","type":"keyword","relevant_pages":[3,6],"retrieved_pages":[6,3,23,6,23],"latency_ms":35.06,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"What negatives was DPR trained with, and on which datasets was the Multi model trained?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,6,6,21,22],"latency_ms":33.8,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.7227},{"question":"Does doing well on MS MARCO tell you a model will do well on unseen domains?","type":"paraphrase","relevant_pages":[2,6,9],"retrieved_pages":[7,7,17,9,17],"latency_ms":40.11,"precision_at_k":0.2,"recall_at_k":0.3333,"reciprocal_rank":0.25,"ndcg_at_k":0.1461},{"question":"How did the authors quantify how similar the domains of two datasets are?","type":"paraphrase","relevant_pages":[4,20],"retrieved_pages":[4,16,20,16,5],"latency_ms":33.82,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5087},{"question":"What is capped recall and why is it needed?","type":"keyword","relevant_pages":[20,21],"retrieved_pages":[20,17,21,5,17],"latency_ms":27.97,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5087},{"question":"What limitations of the benchmark do the authors acknowledge?","type":"paraphrase","relevant_pages":[17],"retrieved_pages":[17,16,17,3,16],"latency_ms":32.79,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5087},{"question":"On which datasets did the cross-encoder re-ranker fail to beat BM25?","type":"factual","relevant_pages":[7],"retrieved_pages":[7,7,16,6,16],"latency_ms":35.02,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5531},{"question":"What hardware was used to measure retrieval latency?","type":"keyword","relevant_pages":[8],"retrieved_pages":[8,23,8,16,8],"latency_ms":25.18,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6399}],"hybrid_reranker":[{"question":"How many datasets and how many retrieval tasks does BEIR include?","type":"factual","relevant_pages":[1,2,3],"retrieved_pages":[9,2,4,6,2],"latency_ms":980.34,"precision_at_k":0.4,"recall_at_k":0.3333,"reciprocal_rank":0.5,"ndcg_at_k":0.3452},{"question":"Which retrieval architecture achieved the best zero-shot performance on BEIR?","type":"factual","relevant_pages":[1,7,8],"retrieved_pages":[1,9,24,3,7],"latency_ms":475.27,"precision_at_k":0.4,"recall_at_k":0.6667,"reciprocal_rank":1.0,"ndcg_at_k":0.4704},{"question":"What k and b parameters were used for Anserini BM25?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,6,6,6,17],"latency_ms":291.31,"precision_at_k":0.2,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.3392},{"question":"Which single evaluation metric does BEIR report for every dataset, and at what cutoff?","type":"keyword","relevant_pages":[5],"retrieved_pages":[5,5,17,2,5],"latency_ms":365.66,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6844},{"question":"Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?","type":"paraphrase","relevant_pages":[5],"retrieved_pages":[5,4,5,6,3],"latency_ms":339.99,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5087},{"question":"How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,7,8,24,6],"latency_ms":595.4,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4704},{"question":"How slow is BM25+CE per query on 1 million DBPedia documents?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,8,8,8,8],"latency_ms":336.52,"precision_at_k":1.0,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":1.0},{"question":"How much storage does a ColBERT index need compared with BM25?","type":"factual","relevant_pages":[8],"retrieved_pages":[8,8,7,8,6],"latency_ms":470.77,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"Why can a keyword-based search engine miss relevant documents that use different wording from the query?","type":"paraphrase","relevant_pages":[1,3],"retrieved_pages":[1,7,17,3,20],"latency_ms":404.92,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4852},{"question":"What does Hole@10 measure, and what values did BM25 and TAS-B get?","type":"keyword","relevant_pages":[9],"retrieved_pages":[9,9,9,9,8],"latency_ms":532.36,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688},{"question":"After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?","type":"factual","relevant_pages":[9],"retrieved_pages":[9,9,2,9,21],"latency_ms":521.66,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"Which BEIR dataset has the longest queries?","type":"factual","relevant_pages":[4],"retrieved_pages":[3,2,4,4,17],"latency_ms":344.13,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":0.3333,"ndcg_at_k":0.3156},{"question":"What nDCG@10 did BM25 and BM25+CE get on SciFact?","type":"keyword","relevant_pages":[7],"retrieved_pages":[7,9,8,24,7],"latency_ms":555.2,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.4704},{"question":"Why do some dense retrievers favour short documents while others favour long ones?","type":"paraphrase","relevant_pages":[7,21],"retrieved_pages":[21,8,21,7,21],"latency_ms":251.19,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.786},{"question":"How does docT5query expand a document?","type":"keyword","relevant_pages":[3,6],"retrieved_pages":[7,3,6,6,13],"latency_ms":234.3,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":0.5,"ndcg_at_k":0.5296},{"question":"What negatives was DPR trained with, and on which datasets was the Multi model trained?","type":"keyword","relevant_pages":[6],"retrieved_pages":[6,6,6,22,21],"latency_ms":435.92,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.7227},{"question":"Does doing well on MS MARCO tell you a model will do well on unseen domains?","type":"paraphrase","relevant_pages":[2,6,9],"retrieved_pages":[7,6,7,17,9],"latency_ms":284.06,"precision_at_k":0.4,"recall_at_k":0.6667,"reciprocal_rank":0.5,"ndcg_at_k":0.3452},{"question":"How did the authors quantify how similar the domains of two datasets are?","type":"paraphrase","relevant_pages":[4,20],"retrieved_pages":[4,5,20,4,16],"latency_ms":423.36,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6548},{"question":"What is capped recall and why is it needed?","type":"keyword","relevant_pages":[20,21],"retrieved_pages":[17,20,21,17,20],"latency_ms":471.23,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":0.5,"ndcg_at_k":0.5148},{"question":"What limitations of the benchmark do the authors acknowledge?","type":"paraphrase","relevant_pages":[17],"retrieved_pages":[17,17,16,17,20],"latency_ms":227.67,"precision_at_k":0.6,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.6992},{"question":"On which datasets did the cross-encoder re-ranker fail to beat BM25?","type":"factual","relevant_pages":[7],"retrieved_pages":[7,7,24,6,9],"latency_ms":553.29,"precision_at_k":0.4,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.5531},{"question":"What hardware was used to measure retrieval latency?","type":"keyword","relevant_pages":[8],"retrieved_pages":[8,8,8,8,9],"latency_ms":406.24,"precision_at_k":0.8,"recall_at_k":1.0,"reciprocal_rank":1.0,"ndcg_at_k":0.8688}]}}
+{
+  "batch_id": "76db343c-818d-4a37-bf55-aca12c923eb2",
+  "dataset_name": "beir-paper-v1",
+  "k": 5,
+  "num_questions": 22,
+  "embedding": {
+    "calls_made": 0,
+    "reused": 22,
+    "avg_latency_ms": null
+  },
+  "results": [
+    {
+      "run_id": "547f1248-2dfe-47af-9f41-202c5c9573b6",
+      "strategy": "baseline",
+      "label": "Baseline (dense, no gate)",
+      "status": "completed",
+      "error_message": null,
+      "k": 5,
+      "num_questions": 22,
+      "avg_precision_at_k": 0.5454545454545454,
+      "avg_recall_at_k": 0.9015151515151516,
+      "avg_mrr": 0.893939393939394,
+      "avg_ndcg_at_k": 0.6006994035643833,
+      "avg_latency_ms": 3.5126872274056287,
+      "by_type": {
+        "factual": {
+          "n": 7,
+          "precision_at_k": 0.5428571428571428,
+          "recall_at_k": 0.8571428571428571,
+          "reciprocal_rank": 0.8333333333333333,
+          "ndcg_at_k": 0.5638493367769347
+        },
+        "keyword": {
+          "n": 9,
+          "precision_at_k": 0.5555555555555556,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg_at_k": 0.6512626000902724
+        },
+        "paraphrase": {
+          "n": 6,
+          "precision_at_k": 0.5333333333333333,
+          "recall_at_k": 0.8055555555555557,
+          "reciprocal_rank": 0.8055555555555557,
+          "ndcg_at_k": 0.5678463533609063
+        }
+      },
+      "created_at": "2026-10-22T18:19:02.130886Z"
+    },
+    {
+      "run_id": "dc0e5caa-7ed9-4e8c-a04e-c4b7ec6ac756",
+      "strategy": "dense",
+      "label": "Dense",
+      "status": "completed",
+      "error_message": null,
+      "k": 5,
+      "num_questions": 22,
+      "avg_precision_at_k": 0.5454545454545454,
+      "avg_recall_at_k": 0.9015151515151516,
+      "avg_mrr": 0.893939393939394,
+      "avg_ndcg_at_k": 0.6006994035643833,
+      "avg_latency_ms": 3.1045002271060764,
+      "by_type": {
+        "factual": {
+          "n": 7,
+          "precision_at_k": 0.5428571428571428,
+          "recall_at_k": 0.8571428571428571,
+          "reciprocal_rank": 0.8333333333333333,
+          "ndcg_at_k": 0.5638493367769347
+        },
+        "keyword": {
+          "n": 9,
+          "precision_at_k": 0.5555555555555556,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg_at_k": 0.6512626000902724
+        },
+        "paraphrase": {
+          "n": 6,
+          "precision_at_k": 0.5333333333333333,
+          "recall_at_k": 0.8055555555555557,
+          "reciprocal_rank": 0.8055555555555557,
+          "ndcg_at_k": 0.5678463533609063
+        }
+      },
+      "created_at": "2026-10-22T18:19:02.219070Z"
+    },
+    {
+      "run_id": "9f65689f-098a-4bba-b270-42b06dbc0e10",
+      "strategy": "bm25",
+      "label": "BM25",
+      "status": "completed",
+      "error_message": null,
+      "k": 5,
+      "num_questions": 22,
+      "avg_precision_at_k": 0.40909090909090917,
+      "avg_recall_at_k": 0.8030303030303029,
+      "avg_mrr": 0.7727272727272727,
+      "avg_ndcg_at_k": 0.4706290932586618,
+      "avg_latency_ms": 23.917225409067296,
+      "by_type": {
+        "factual": {
+          "n": 7,
+          "precision_at_k": 0.4857142857142857,
+          "recall_at_k": 0.7142857142857143,
+          "reciprocal_rank": 0.7619047619047619,
+          "ndcg_at_k": 0.5406590500805029
+        },
+        "keyword": {
+          "n": 9,
+          "precision_at_k": 0.3777777777777778,
+          "recall_at_k": 0.9444444444444444,
+          "reciprocal_rank": 0.9259259259259258,
+          "ndcg_at_k": 0.48130318706649
+        },
+        "paraphrase": {
+          "n": 6,
+          "precision_at_k": 0.3666666666666667,
+          "recall_at_k": 0.6944444444444443,
+          "reciprocal_rank": 0.5555555555555555,
+          "ndcg_at_k": 0.37291633625477155
+        }
+      },
+      "created_at": "2026-10-22T18:19:02.299021Z"
+    },
+    {
+      "run_id": "066499da-e8f5-438f-9c51-aeb57615e742",
+      "strategy": "hybrid",
+      "label": "Hybrid (RRF)",
+      "status": "completed",
+      "error_message": null,
+      "k": 5,
+      "num_questions": 22,
+      "avg_precision_at_k": 0.5181818181818181,
+      "avg_recall_at_k": 0.9393939393939393,
+      "avg_mrr": 0.8348484848484848,
+      "avg_ndcg_at_k": 0.5714558045232226,
+      "avg_latency_ms": 27.67617886374038,
+      "by_type": {
+        "factual": {
+          "n": 7,
+          "precision_at_k": 0.5714285714285714,
+          "recall_at_k": 0.9047619047619048,
+          "reciprocal_rank": 0.6833333333333333,
+          "ndcg_at_k": 0.5747873932563002
+        },
+        "keyword": {
+          "n": 9,
+          "precision_at_k": 0.48888888888888893,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 1.0,
+          "ndcg_at_k": 0.5917441718472396
+        },
+        "paraphrase": {
+          "n": 6,
+          "precision_at_k": 0.5,
+          "recall_at_k": 0.888888888888889,
+          "reciprocal_rank": 0.7638888888888888,
+          "ndcg_at_k": 0.5371364000152731
+        }
+      },
+      "created_at": "2026-10-22T18:19:02.836496Z"
+    },
+    {
+      "run_id": "a8c7276b-441e-438b-9e3c-b5032b1f7995",
+      "strategy": "hybrid_reranker",
+      "label": "Hybrid + Cross-Encoder",
+      "status": "completed",
+      "error_message": null,
+      "k": 5,
+      "num_questions": 22,
+      "avg_precision_at_k": 0.5363636363636364,
+      "avg_recall_at_k": 0.9545454545454546,
+      "avg_mrr": 0.8787878787878789,
+      "avg_ndcg_at_k": 0.5821875046980737,
+      "avg_latency_ms": 725.4371111817735,
+      "by_type": {
+        "factual": {
+          "n": 7,
+          "precision_at_k": 0.6,
+          "recall_at_k": 0.9047619047619048,
+          "reciprocal_rank": 0.8333333333333333,
+          "ndcg_at_k": 0.6262237667673336
+        },
+        "keyword": {
+          "n": 9,
+          "precision_at_k": 0.48888888888888893,
+          "recall_at_k": 1.0,
+          "reciprocal_rank": 0.8888888888888888,
+          "ndcg_at_k": 0.5553999572553385
+        },
+        "paraphrase": {
+          "n": 6,
+          "precision_at_k": 0.5333333333333333,
+          "recall_at_k": 0.9444444444444443,
+          "reciprocal_rank": 0.9166666666666666,
+          "ndcg_at_k": 0.570993186781373
+        }
+      },
+      "created_at": "2026-10-22T18:19:03.454846Z"
+    }
+  ],
+  "per_question": {
+    "baseline": [
+      {
+        "question": "How many datasets and how many retrieval tasks does BEIR include?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          2,
+          3
+        ],
+        "retrieved_pages": [
+          4,
+          2,
+          9,
+          2,
+          2
+        ],
+        "latency_ms": 2.98,
+        "precision_at_k": 0.6,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.4913
+      },
+      {
+        "question": "Which retrieval architecture achieved the best zero-shot performance on BEIR?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          7,
+          8
+        ],
+        "retrieved_pages": [
+          1,
+          9,
+          3,
+          7,
+          6
+        ],
+        "latency_ms": 3.7,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "What k and b parameters were used for Anserini BM25?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          6,
+          6,
+          21,
+          6
+        ],
+        "latency_ms": 4.93,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "Which single evaluation metric does BEIR report for every dataset, and at what cutoff?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          5,
+          5,
+          5,
+          2
+        ],
+        "latency_ms": 3.14,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      },
+      {
+        "question": "Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          5,
+          3,
+          9,
+          3
+        ],
+        "latency_ms": 3.73,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5531
+      },
+      {
+        "question": "How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          8,
+          7,
+          24,
+          5
+        ],
+        "latency_ms": 5.71,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "How slow is BM25+CE per query on 1 million DBPedia documents?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          8
+        ],
+        "latency_ms": 3.86,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      {
+        "question": "How much storage does a ColBERT index need compared with BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          7,
+          6,
+          8,
+          13
+        ],
+        "latency_ms": 4.13,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "Why can a keyword-based search engine miss relevant documents that use different wording from the query?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          1,
+          3
+        ],
+        "retrieved_pages": [
+          7,
+          1,
+          3,
+          6,
+          3
+        ],
+        "latency_ms": 3.05,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.5148
+      },
+      {
+        "question": "What does Hole@10 measure, and what values did BM25 and TAS-B get?",
+        "type": "keyword",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          9,
+          9,
+          21
+        ],
+        "latency_ms": 3.73,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      },
+      {
+        "question": "After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?",
+        "type": "factual",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          21,
+          9,
+          7
+        ],
+        "latency_ms": 4.45,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "Which BEIR dataset has the longest queries?",
+        "type": "factual",
+        "relevant_pages": [
+          4
+        ],
+        "retrieved_pages": [
+          2,
+          3,
+          4,
+          17,
+          4
+        ],
+        "latency_ms": 2.93,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3008
+      },
+      {
+        "question": "What nDCG@10 did BM25 and BM25+CE get on SciFact?",
+        "type": "keyword",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          9,
+          24,
+          8,
+          7
+        ],
+        "latency_ms": 3.57,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4704
+      },
+      {
+        "question": "Why do some dense retrievers favour short documents while others favour long ones?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          7,
+          21
+        ],
+        "retrieved_pages": [
+          21,
+          21,
+          21,
+          8,
+          21
+        ],
+        "latency_ms": 2.57,
+        "precision_at_k": 0.8,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8539
+      },
+      {
+        "question": "How does docT5query expand a document?",
+        "type": "keyword",
+        "relevant_pages": [
+          3,
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          6,
+          7,
+          3,
+          13
+        ],
+        "latency_ms": 3.98,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "What negatives was DPR trained with, and on which datasets was the Multi model trained?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          6,
+          21,
+          22,
+          6
+        ],
+        "latency_ms": 3.59,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6844
+      },
+      {
+        "question": "Does doing well on MS MARCO tell you a model will do well on unseen domains?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          2,
+          6,
+          9
+        ],
+        "retrieved_pages": [
+          17,
+          17,
+          6,
+          7,
+          1
+        ],
+        "latency_ms": 2.93,
+        "precision_at_k": 0.2,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.1696
+      },
+      {
+        "question": "How did the authors quantify how similar the domains of two datasets are?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          4,
+          20
+        ],
+        "retrieved_pages": [
+          4,
+          20,
+          5,
+          4,
+          4
+        ],
+        "latency_ms": 2.37,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8304
+      },
+      {
+        "question": "What is capped recall and why is it needed?",
+        "type": "keyword",
+        "relevant_pages": [
+          20,
+          21
+        ],
+        "retrieved_pages": [
+          21,
+          20,
+          20,
+          17,
+          23
+        ],
+        "latency_ms": 2.25,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "What limitations of the benchmark do the authors acknowledge?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          17
+        ],
+        "retrieved_pages": [
+          17,
+          3,
+          16,
+          17,
+          16
+        ],
+        "latency_ms": 2.29,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "On which datasets did the cross-encoder re-ranker fail to beat BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          6,
+          9,
+          7,
+          24
+        ],
+        "latency_ms": 4.08,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "What hardware was used to measure retrieval latency?",
+        "type": "keyword",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          5
+        ],
+        "latency_ms": 3.33,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      }
+    ],
+    "dense": [
+      {
+        "question": "How many datasets and how many retrieval tasks does BEIR include?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          2,
+          3
+        ],
+        "retrieved_pages": [
+          4,
+          2,
+          9,
+          2,
+          2
+        ],
+        "latency_ms": 6.6,
+        "precision_at_k": 0.6,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.4913
+      },
+      {
+        "question": "Which retrieval architecture achieved the best zero-shot performance on BEIR?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          7,
+          8
+        ],
+        "retrieved_pages": [
+          1,
+          9,
+          3,
+          7,
+          6
+        ],
+        "latency_ms": 3.13,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "What k and b parameters were used for Anserini BM25?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          6,
+          6,
+          21,
+          6
+        ],
+        "latency_ms": 2.97,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "Which single evaluation metric does BEIR report for every dataset, and at what cutoff?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          5,
+          5,
+          5,
+          2
+        ],
+        "latency_ms": 2.67,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      },
+      {
+        "question": "Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          5,
+          3,
+          9,
+          3
+        ],
+        "latency_ms": 3.06,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5531
+      },
+      {
+        "question": "How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          8,
+          7,
+          24,
+          5
+        ],
+        "latency_ms": 3.03,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "How slow is BM25+CE per query on 1 million DBPedia documents?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          8
+        ],
+        "latency_ms": 2.57,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      {
+        "question": "How much storage does a ColBERT index need compared with BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          7,
+          6,
+          8,
+          13
+        ],
+        "latency_ms": 2.22,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "Why can a keyword-based search engine miss relevant documents that use different wording from the query?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          1,
+          3
+        ],
+        "retrieved_pages": [
+          7,
+          1,
+          3,
+          6,
+          3
+        ],
+        "latency_ms": 2.31,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.5148
+      },
+      {
+        "question": "What does Hole@10 measure, and what values did BM25 and TAS-B get?",
+        "type": "keyword",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          9,
+          9,
+          21
+        ],
+        "latency_ms": 2.3,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      },
+      {
+        "question": "After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?",
+        "type": "factual",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          21,
+          9,
+          7
+        ],
+        "latency_ms": 3.29,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "Which BEIR dataset has the longest queries?",
+        "type": "factual",
+        "relevant_pages": [
+          4
+        ],
+        "retrieved_pages": [
+          2,
+          3,
+          4,
+          17,
+          4
+        ],
+        "latency_ms": 3.26,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3008
+      },
+      {
+        "question": "What nDCG@10 did BM25 and BM25+CE get on SciFact?",
+        "type": "keyword",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          9,
+          24,
+          8,
+          7
+        ],
+        "latency_ms": 2.41,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4704
+      },
+      {
+        "question": "Why do some dense retrievers favour short documents while others favour long ones?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          7,
+          21
+        ],
+        "retrieved_pages": [
+          21,
+          21,
+          21,
+          8,
+          21
+        ],
+        "latency_ms": 2.6,
+        "precision_at_k": 0.8,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8539
+      },
+      {
+        "question": "How does docT5query expand a document?",
+        "type": "keyword",
+        "relevant_pages": [
+          3,
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          6,
+          7,
+          3,
+          13
+        ],
+        "latency_ms": 2.86,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "What negatives was DPR trained with, and on which datasets was the Multi model trained?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          6,
+          21,
+          22,
+          6
+        ],
+        "latency_ms": 2.81,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6844
+      },
+      {
+        "question": "Does doing well on MS MARCO tell you a model will do well on unseen domains?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          2,
+          6,
+          9
+        ],
+        "retrieved_pages": [
+          17,
+          17,
+          6,
+          7,
+          1
+        ],
+        "latency_ms": 4.72,
+        "precision_at_k": 0.2,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.1696
+      },
+      {
+        "question": "How did the authors quantify how similar the domains of two datasets are?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          4,
+          20
+        ],
+        "retrieved_pages": [
+          4,
+          20,
+          5,
+          4,
+          4
+        ],
+        "latency_ms": 3.05,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8304
+      },
+      {
+        "question": "What is capped recall and why is it needed?",
+        "type": "keyword",
+        "relevant_pages": [
+          20,
+          21
+        ],
+        "retrieved_pages": [
+          21,
+          20,
+          20,
+          17,
+          23
+        ],
+        "latency_ms": 2.85,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "What limitations of the benchmark do the authors acknowledge?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          17
+        ],
+        "retrieved_pages": [
+          17,
+          3,
+          16,
+          17,
+          16
+        ],
+        "latency_ms": 2.65,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "On which datasets did the cross-encoder re-ranker fail to beat BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          6,
+          9,
+          7,
+          24
+        ],
+        "latency_ms": 2.65,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "What hardware was used to measure retrieval latency?",
+        "type": "keyword",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          5
+        ],
+        "latency_ms": 4.3,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      }
+    ],
+    "bm25": [
+      {
+        "question": "How many datasets and how many retrieval tasks does BEIR include?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          2,
+          3
+        ],
+        "retrieved_pages": [
+          3,
+          9,
+          9,
+          9,
+          4
+        ],
+        "latency_ms": 24.52,
+        "precision_at_k": 0.2,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "Which retrieval architecture achieved the best zero-shot performance on BEIR?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          7,
+          8
+        ],
+        "retrieved_pages": [
+          3,
+          24,
+          8,
+          9,
+          7
+        ],
+        "latency_ms": 24.71,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3008
+      },
+      {
+        "question": "What k and b parameters were used for Anserini BM25?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          6,
+          6,
+          6,
+          21
+        ],
+        "latency_ms": 19.61,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "Which single evaluation metric does BEIR report for every dataset, and at what cutoff?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          17,
+          17,
+          3,
+          3
+        ],
+        "latency_ms": 29.97,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          4,
+          5,
+          16,
+          6,
+          5
+        ],
+        "latency_ms": 20.28,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.3452
+      },
+      {
+        "question": "How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          7,
+          3,
+          8,
+          22
+        ],
+        "latency_ms": 22.36,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "How slow is BM25+CE per query on 1 million DBPedia documents?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          4,
+          8,
+          2
+        ],
+        "latency_ms": 21.18,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "How much storage does a ColBERT index need compared with BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          9
+        ],
+        "latency_ms": 22.21,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      },
+      {
+        "question": "Why can a keyword-based search engine miss relevant documents that use different wording from the query?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          1,
+          3
+        ],
+        "retrieved_pages": [
+          17,
+          18,
+          3,
+          2,
+          21
+        ],
+        "latency_ms": 17.88,
+        "precision_at_k": 0.2,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.1696
+      },
+      {
+        "question": "What does Hole@10 measure, and what values did BM25 and TAS-B get?",
+        "type": "keyword",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          8,
+          8,
+          7
+        ],
+        "latency_ms": 22.99,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5531
+      },
+      {
+        "question": "After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?",
+        "type": "factual",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          9,
+          2,
+          9
+        ],
+        "latency_ms": 18.5,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8539
+      },
+      {
+        "question": "Which BEIR dataset has the longest queries?",
+        "type": "factual",
+        "relevant_pages": [
+          4
+        ],
+        "retrieved_pages": [
+          20,
+          18,
+          18,
+          20,
+          19
+        ],
+        "latency_ms": 22.96,
+        "precision_at_k": 0.0,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      {
+        "question": "What nDCG@10 did BM25 and BM25+CE get on SciFact?",
+        "type": "keyword",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          8,
+          9,
+          7,
+          7,
+          6
+        ],
+        "latency_ms": 27.7,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3156
+      },
+      {
+        "question": "Why do some dense retrievers favour short documents while others favour long ones?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          7,
+          21
+        ],
+        "retrieved_pages": [
+          3,
+          21,
+          21,
+          4,
+          7
+        ],
+        "latency_ms": 34.22,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.5148
+      },
+      {
+        "question": "How does docT5query expand a document?",
+        "type": "keyword",
+        "relevant_pages": [
+          3,
+          6
+        ],
+        "retrieved_pages": [
+          3,
+          6,
+          7,
+          9,
+          9
+        ],
+        "latency_ms": 22.1,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5531
+      },
+      {
+        "question": "What negatives was DPR trained with, and on which datasets was the Multi model trained?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          6,
+          7,
+          6,
+          7
+        ],
+        "latency_ms": 23.88,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "Does doing well on MS MARCO tell you a model will do well on unseen domains?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          2,
+          6,
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          2,
+          7,
+          7,
+          4
+        ],
+        "latency_ms": 23.95,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5531
+      },
+      {
+        "question": "How did the authors quantify how similar the domains of two datasets are?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          4,
+          20
+        ],
+        "retrieved_pages": [
+          17,
+          16,
+          16,
+          16,
+          16
+        ],
+        "latency_ms": 28.1,
+        "precision_at_k": 0.0,
+        "recall_at_k": 0.0,
+        "reciprocal_rank": 0.0,
+        "ndcg_at_k": 0.0
+      },
+      {
+        "question": "What is capped recall and why is it needed?",
+        "type": "keyword",
+        "relevant_pages": [
+          20,
+          21
+        ],
+        "retrieved_pages": [
+          20,
+          17,
+          17,
+          24,
+          9
+        ],
+        "latency_ms": 20.78,
+        "precision_at_k": 0.2,
+        "recall_at_k": 0.5,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "What limitations of the benchmark do the authors acknowledge?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          17
+        ],
+        "retrieved_pages": [
+          17,
+          16,
+          17,
+          17,
+          20
+        ],
+        "latency_ms": 25.66,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6548
+      },
+      {
+        "question": "On which datasets did the cross-encoder re-ranker fail to beat BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          7,
+          7,
+          16,
+          6
+        ],
+        "latency_ms": 26.25,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "What hardware was used to measure retrieval latency?",
+        "type": "keyword",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          4,
+          8
+        ],
+        "latency_ms": 26.34,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8539
+      }
+    ],
+    "hybrid": [
+      {
+        "question": "How many datasets and how many retrieval tasks does BEIR include?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          2,
+          3
+        ],
+        "retrieved_pages": [
+          9,
+          4,
+          4,
+          3,
+          2
+        ],
+        "latency_ms": 35.26,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.25,
+        "ndcg_at_k": 0.2773
+      },
+      {
+        "question": "Which retrieval architecture achieved the best zero-shot performance on BEIR?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          7,
+          8
+        ],
+        "retrieved_pages": [
+          3,
+          9,
+          7,
+          2,
+          1
+        ],
+        "latency_ms": 30.65,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3008
+      },
+      {
+        "question": "What k and b parameters were used for Anserini BM25?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          6,
+          6,
+          6,
+          21
+        ],
+        "latency_ms": 29.61,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "Which single evaluation metric does BEIR report for every dataset, and at what cutoff?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          17,
+          5,
+          5,
+          17
+        ],
+        "latency_ms": 32.65,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6548
+      },
+      {
+        "question": "Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          5,
+          4,
+          3,
+          16
+        ],
+        "latency_ms": 28.2,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5531
+      },
+      {
+        "question": "How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          7,
+          7,
+          8,
+          3
+        ],
+        "latency_ms": 29.51,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "How slow is BM25+CE per query on 1 million DBPedia documents?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          8
+        ],
+        "latency_ms": 29.42,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      {
+        "question": "How much storage does a ColBERT index need compared with BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          7,
+          6
+        ],
+        "latency_ms": 28.98,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "Why can a keyword-based search engine miss relevant documents that use different wording from the query?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          1,
+          3
+        ],
+        "retrieved_pages": [
+          7,
+          17,
+          1,
+          18,
+          3
+        ],
+        "latency_ms": 35.79,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.3008
+      },
+      {
+        "question": "What does Hole@10 measure, and what values did BM25 and TAS-B get?",
+        "type": "keyword",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          9,
+          8,
+          8
+        ],
+        "latency_ms": 37.69,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?",
+        "type": "factual",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          9,
+          9,
+          21
+        ],
+        "latency_ms": 39.06,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      },
+      {
+        "question": "Which BEIR dataset has the longest queries?",
+        "type": "factual",
+        "relevant_pages": [
+          4
+        ],
+        "retrieved_pages": [
+          3,
+          2,
+          20,
+          18,
+          4
+        ],
+        "latency_ms": 29.4,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.2,
+        "ndcg_at_k": 0.1312
+      },
+      {
+        "question": "What nDCG@10 did BM25 and BM25+CE get on SciFact?",
+        "type": "keyword",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          9,
+          8,
+          24,
+          7
+        ],
+        "latency_ms": 24.0,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4704
+      },
+      {
+        "question": "Why do some dense retrievers favour short documents while others favour long ones?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          7,
+          21
+        ],
+        "retrieved_pages": [
+          21,
+          21,
+          7,
+          21,
+          3
+        ],
+        "latency_ms": 25.25,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      },
+      {
+        "question": "How does docT5query expand a document?",
+        "type": "keyword",
+        "relevant_pages": [
+          3,
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          3,
+          7,
+          6,
+          9
+        ],
+        "latency_ms": 19.42,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "What negatives was DPR trained with, and on which datasets was the Multi model trained?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          6,
+          6,
+          21,
+          7
+        ],
+        "latency_ms": 18.65,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "Does doing well on MS MARCO tell you a model will do well on unseen domains?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          2,
+          6,
+          9
+        ],
+        "retrieved_pages": [
+          7,
+          7,
+          17,
+          9,
+          17
+        ],
+        "latency_ms": 22.6,
+        "precision_at_k": 0.2,
+        "recall_at_k": 0.3333,
+        "reciprocal_rank": 0.25,
+        "ndcg_at_k": 0.1461
+      },
+      {
+        "question": "How did the authors quantify how similar the domains of two datasets are?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          4,
+          20
+        ],
+        "retrieved_pages": [
+          4,
+          4,
+          17,
+          20,
+          16
+        ],
+        "latency_ms": 25.09,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "What is capped recall and why is it needed?",
+        "type": "keyword",
+        "relevant_pages": [
+          20,
+          21
+        ],
+        "retrieved_pages": [
+          20,
+          17,
+          21,
+          17,
+          16
+        ],
+        "latency_ms": 19.83,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5087
+      },
+      {
+        "question": "What limitations of the benchmark do the authors acknowledge?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          17
+        ],
+        "retrieved_pages": [
+          17,
+          16,
+          17,
+          17,
+          3
+        ],
+        "latency_ms": 21.16,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6548
+      },
+      {
+        "question": "On which datasets did the cross-encoder re-ranker fail to beat BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          7,
+          7,
+          6,
+          9
+        ],
+        "latency_ms": 24.73,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "What hardware was used to measure retrieval latency?",
+        "type": "keyword",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          4
+        ],
+        "latency_ms": 21.93,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      }
+    ],
+    "hybrid_reranker": [
+      {
+        "question": "How many datasets and how many retrieval tasks does BEIR include?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          2,
+          3
+        ],
+        "retrieved_pages": [
+          9,
+          2,
+          4,
+          3,
+          2
+        ],
+        "latency_ms": 274.65,
+        "precision_at_k": 0.6,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.4913
+      },
+      {
+        "question": "Which retrieval architecture achieved the best zero-shot performance on BEIR?",
+        "type": "factual",
+        "relevant_pages": [
+          1,
+          7,
+          8
+        ],
+        "retrieved_pages": [
+          1,
+          9,
+          24,
+          3,
+          8
+        ],
+        "latency_ms": 644.04,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4704
+      },
+      {
+        "question": "What k and b parameters were used for Anserini BM25?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          6,
+          6,
+          6,
+          6
+        ],
+        "latency_ms": 521.32,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "Which single evaluation metric does BEIR report for every dataset, and at what cutoff?",
+        "type": "keyword",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          5,
+          17,
+          2,
+          5
+        ],
+        "latency_ms": 433.12,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6844
+      },
+      {
+        "question": "Why did the authors decide against precision, recall, MRR or MAP as the main way to compare systems?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          5
+        ],
+        "retrieved_pages": [
+          5,
+          4,
+          5,
+          6,
+          3
+        ],
+        "latency_ms": 379.81,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.5087
+      },
+      {
+        "question": "How many first-stage results does BM25+CE re-rank, and which cross-encoder does it use?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          7,
+          8,
+          7,
+          24
+        ],
+        "latency_ms": 921.0,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.3392
+      },
+      {
+        "question": "How slow is BM25+CE per query on 1 million DBPedia documents?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          8
+        ],
+        "latency_ms": 507.94,
+        "precision_at_k": 1.0,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 1.0
+      },
+      {
+        "question": "How much storage does a ColBERT index need compared with BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          7,
+          8,
+          6
+        ],
+        "latency_ms": 568.88,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "Why can a keyword-based search engine miss relevant documents that use different wording from the query?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          1,
+          3
+        ],
+        "retrieved_pages": [
+          1,
+          7,
+          17,
+          6,
+          3
+        ],
+        "latency_ms": 695.51,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4704
+      },
+      {
+        "question": "What does Hole@10 measure, and what values did BM25 and TAS-B get?",
+        "type": "keyword",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          8,
+          9,
+          7
+        ],
+        "latency_ms": 1231.56,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "After the missing relevance judgements were annotated, how did ANCE's TREC-COVID score change?",
+        "type": "factual",
+        "relevant_pages": [
+          9
+        ],
+        "retrieved_pages": [
+          9,
+          9,
+          2,
+          9,
+          9
+        ],
+        "latency_ms": 1453.5,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8304
+      },
+      {
+        "question": "Which BEIR dataset has the longest queries?",
+        "type": "factual",
+        "relevant_pages": [
+          4
+        ],
+        "retrieved_pages": [
+          3,
+          2,
+          4,
+          20,
+          18
+        ],
+        "latency_ms": 1338.55,
+        "precision_at_k": 0.2,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.3333,
+        "ndcg_at_k": 0.1696
+      },
+      {
+        "question": "What nDCG@10 did BM25 and BM25+CE get on SciFact?",
+        "type": "keyword",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          9,
+          8,
+          7,
+          24
+        ],
+        "latency_ms": 1331.38,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.4852
+      },
+      {
+        "question": "Why do some dense retrievers favour short documents while others favour long ones?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          7,
+          21
+        ],
+        "retrieved_pages": [
+          21,
+          8,
+          21,
+          21,
+          7
+        ],
+        "latency_ms": 758.33,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.786
+      },
+      {
+        "question": "How does docT5query expand a document?",
+        "type": "keyword",
+        "relevant_pages": [
+          3,
+          6
+        ],
+        "retrieved_pages": [
+          7,
+          3,
+          6,
+          9,
+          6
+        ],
+        "latency_ms": 546.57,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.5148
+      },
+      {
+        "question": "What negatives was DPR trained with, and on which datasets was the Multi model trained?",
+        "type": "keyword",
+        "relevant_pages": [
+          6
+        ],
+        "retrieved_pages": [
+          6,
+          6,
+          7,
+          7,
+          6
+        ],
+        "latency_ms": 819.97,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6844
+      },
+      {
+        "question": "Does doing well on MS MARCO tell you a model will do well on unseen domains?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          2,
+          6,
+          9
+        ],
+        "retrieved_pages": [
+          7,
+          6,
+          7,
+          17,
+          9
+        ],
+        "latency_ms": 684.25,
+        "precision_at_k": 0.4,
+        "recall_at_k": 0.6667,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.3452
+      },
+      {
+        "question": "How did the authors quantify how similar the domains of two datasets are?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          4,
+          20
+        ],
+        "retrieved_pages": [
+          4,
+          5,
+          17,
+          4,
+          20
+        ],
+        "latency_ms": 563.99,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6164
+      },
+      {
+        "question": "What is capped recall and why is it needed?",
+        "type": "keyword",
+        "relevant_pages": [
+          20,
+          21
+        ],
+        "retrieved_pages": [
+          17,
+          20,
+          21,
+          17,
+          24
+        ],
+        "latency_ms": 684.76,
+        "precision_at_k": 0.4,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 0.5,
+        "ndcg_at_k": 0.3836
+      },
+      {
+        "question": "What limitations of the benchmark do the authors acknowledge?",
+        "type": "paraphrase",
+        "relevant_pages": [
+          17
+        ],
+        "retrieved_pages": [
+          17,
+          17,
+          16,
+          17,
+          20
+        ],
+        "latency_ms": 372.08,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.6992
+      },
+      {
+        "question": "On which datasets did the cross-encoder re-ranker fail to beat BM25?",
+        "type": "factual",
+        "relevant_pages": [
+          7
+        ],
+        "retrieved_pages": [
+          7,
+          7,
+          7,
+          6,
+          24
+        ],
+        "latency_ms": 775.77,
+        "precision_at_k": 0.6,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.7227
+      },
+      {
+        "question": "What hardware was used to measure retrieval latency?",
+        "type": "keyword",
+        "relevant_pages": [
+          8
+        ],
+        "retrieved_pages": [
+          8,
+          8,
+          8,
+          8,
+          5
+        ],
+        "latency_ms": 452.62,
+        "precision_at_k": 0.8,
+        "recall_at_k": 1.0,
+        "reciprocal_rank": 1.0,
+        "ndcg_at_k": 0.8688
+      }
+    ]
+  }
+}

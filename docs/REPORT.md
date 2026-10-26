@@ -14,7 +14,7 @@ For setup and API details see the [README](../README.md).
 | 3 | Upload → retrieve → generate → answer + citations; query page | Dense RAG with distance gate and `[Source N]` citations (#5, #11); Ask page (#18) |
 | 4 | Dense vs BM25 vs Hybrid comparison; experiment API, config storage, comparison UI | `retrieve_*` strategies incl. BM25 and RRF hybrid, `/api/experiments`, saved configs, Experiments page (#14); cross-encoder reranking (#15) |
 | 5 | Recall@K, Precision@K, MRR, NDCG; faithfulness, relevance, citation accuracy; evaluation dashboard | Retrieval metrics on page labels and a 22-question labelled benchmark (#16); LLM-judge generation metrics and dashboard (#12, extended in #16) |
-| 6 | Final benchmarks, graphs, Docker, deployment, README, demo flow | Docker Compose stack (#12), CI (#13), rate-limit handling (#17), benchmark runner with charts, README, deployment guide and this report (finalization PR) |
+| 6 | Final benchmarks, graphs, Docker, deployment, README, demo flow | Docker Compose stack (#12), CI (#13), rate-limit handling (#17), benchmark runner with charts, README, deployment guide and this report (finalization PR); BM25 tokeniser fix, held-out tuning of pool size and RRF constant ([tuning](benchmarks/tuning.md)), production-safe compose defaults, dependency cleanup and a final benchmark (Week 6 PR) |
 
 Things the plan said **not** to build were not built:
 
@@ -57,15 +57,15 @@ python scripts/run_benchmark.py
 It writes tables to [benchmarks/results.md](benchmarks/results.md) and charts
 to `docs/benchmarks/`, which the README's results section links to.
 
-**Measured** (22 questions, generation `gemini-3.5-flash-lite`, judge
-`gemma-4-31b-it`, retrieval at K=3):
+**Measured** (22 questions, Week 6 code, generation `gemini-3.5-flash-lite`,
+judge `gemma-4-31b-it`, retrieval at K=3):
 
-| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Refusals | Pipeline latency |
+| Configuration | Faithfulness | Answer relevance | Context relevance | Citation accuracy | Overall | Refusals | Median latency |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| Baseline | 0.955 | **0.818** | 0.605 | 0.955 | 0.857 | 4 | 1.36 s |
-| Dense | 0.955 | 0.773 | 0.610 | 0.955 | 0.849 | 5 | **1.30 s** |
-| Hybrid (RRF) | **1.000** | 0.659 | 0.602 | 0.991 | 0.850 | 7 | 1.38 s |
-| Hybrid + Cross-Encoder | **1.000** | 0.773 | **0.636** | **1.000** | **0.882** | 5 | 2.49 s |
+| Baseline | 0.955 | 0.773 | 0.597 | 0.955 | 0.847 | 5 | 5.0 s |
+| Dense | 0.955 | **0.809** | **0.605** | 0.955 | 0.856 | 4 | 4.4 s |
+| Hybrid (RRF) | **1.000** | 0.682 | 0.594 | 0.991 | 0.853 | 7 | 4.3 s |
+| Hybrid + Cross-Encoder | **1.000** | 0.727 | 0.603 | **1.000** | **0.866** | 6 | 5.1 s |
 
 *Refusals* are the answer "I cannot find relevant information in the provided
 documents.", given when retrieval finds nothing close enough or the retrieved
@@ -75,28 +75,32 @@ drive most of the differences between configurations.
 
 | Overall score by question type | Baseline | Dense | Hybrid | Hybrid + CE |
 |---|---:|---:|---:|---:|
-| factual (n=7) | 0.782 | 0.782 | 0.846 | **0.871** |
-| keyword (n=9) | **0.868** | **0.868** | 0.841 | 0.867 |
-| paraphrase (n=6) | **0.929** | 0.899 | 0.868 | 0.917 |
+| factual (n=7) | 0.773 | 0.782 | 0.840 | **0.871** |
+| keyword (n=9) | **0.868** | **0.868** | 0.852 | 0.848 |
+| paraphrase (n=6) | 0.900 | **0.922** | 0.869 | 0.887 |
 
 **What the numbers showed**, against the expectations below:
 
-- **Reranking pays off.** Hybrid + Cross-Encoder is best overall and best on
-  factual questions. All 17 of its non-refusal answers were fully grounded
-  with correct citations.
+- **Reranking pays off.** Hybrid + Cross-Encoder is best overall (0.866) and
+  best on factual questions. All 16 of its non-refusal answers were fully
+  grounded, relevant and correctly cited.
 - **Refusals separate the configurations.** Plain Hybrid refused 7 of 22
-  questions, against 4–5 for the others, which explains its 0.659 answer
-  relevance.
-- **BM25 did not help keyword questions.** The expectation was that keyword
-  questions favour BM25. Instead, hybrid scored lowest on them (0.841),
-  most likely because the `lower().split()` tokeniser keeps punctuation and
-  stopwords (see the retrieval benchmark). This is the Week 6 optimisation
-  target.
-- **Paraphrases favour dense retrieval**, as expected: Baseline leads (0.929)
-  and plain Hybrid trails (0.868).
-- **Latency.** Generation takes about 1.3 s for every configuration. The
-  cross-encoder added about 1.1 s per answer in this run, more than the 0.3 s
-  the retrieval benchmark measured for it; the difference wasn't isolated.
+  questions, against 4–6 for the others, which explains its 0.682 answer
+  relevance. Its 15 actual answers were all fully grounded and relevant.
+- **Dense-only answers more but less faithfully.** Dense answered 18 of 22
+  and has the best answer relevance, but on the questions it answers,
+  faithfulness is 0.944: a few answers add claims the context doesn't support.
+  Both hybrid configurations score 1.000.
+- **BM25 still doesn't win keyword questions end to end.** Week 6 fixed the
+  tokeniser (BM25 nDCG@3 0.328 → 0.564), and BM25 now leads retrieval on
+  factual questions, but on keyword questions dense retrieval already finds
+  the page (nDCG@3 0.771), so fusion has little to add there.
+- **Paraphrases favour dense retrieval**, as expected: Dense leads (0.922).
+- **Latency is the API's, not the retriever's.** Median end-to-end time was
+  4.3–5.1 s for every configuration on 22 October, against 1.3 s for the same
+  pipelines on 21 October: Gemini's response time dominates and varies by day.
+  Retrieval adds 3 ms (dense) to 22 ms (hybrid), and the cross-encoder 0.3–1.3 s
+  on a laptop CPU.
 
 **What was expected before the run:**
 
@@ -130,9 +134,9 @@ drive most of the differences between configurations.
    - "What k and b parameters were used for Anserini BM25?": every strategy
      ranks page 5 first.
    - "Why do some dense retrievers favour short documents while others favour
-     long ones?": dense finds the labelled page 21, while BM25 drifts to pages
-     3, 4 and 7. Hybrid keeps page 21 and adds BM25's page 7, which is the other
-     labelled page.
+     long ones?": dense returns the labelled page 21 three times, while BM25
+     ranks page 3 first. Hybrid keeps page 21 and adds page 7, which is the
+     other labelled page.
 
    Point at the agreement matrix and the latency chart.
 4. **Evaluation.** Open a completed benchmark run:
@@ -186,17 +190,18 @@ One call scores all four metrics, each against its own rubric.
   default score. Citation accuracy adds a deterministic check: citing a chunk
   that was never retrieved caps the score at 0.2.
 
-**What latency/quality trade-off appeared?** Generation (about 1.3 s) dominates
-dense and hybrid, which differ by under 0.1 s. The cross-encoder is the one
-real cost: about 1.1 s more per answer for the best quality (0.882 vs 0.850
-overall for hybrid). The quality-vs-latency chart in `benchmarks/` shows this.
+**What latency/quality trade-off appeared?** Generation dominates: 1.3 s
+medians on one day and 4–5 s on another, for every configuration. Dense and
+hybrid retrieval differ by about 20 ms. The cross-encoder is the one real
+retrieval cost, 0.3–1.3 s per query on a laptop CPU, for the best quality
+(0.866 overall against 0.853 for plain hybrid).
 
 **Which configuration performed best and why?** Hybrid + Cross-Encoder,
-at 0.882 overall, with every non-refusal answer fully grounded. Hybrid
+at 0.866 overall, with every non-refusal answer fully grounded. Hybrid
 retrieval widens the candidate pool, and the cross-encoder, which reads the
 question and chunk together, puts the relevant chunk first. Without the
 reranker, plain Hybrid refuses 7 of 22 questions and its answer relevance
-drops to 0.659.
+drops to 0.682.
 
 ## 6. Engineering decisions worth mentioning
 
@@ -227,5 +232,5 @@ drops to 0.659.
   powering both an interactive side-by-side comparison UI and an end-to-end
   benchmark runner that produces tables and quality-vs-latency charts.
 - Hardened the system for production use: quota-aware retry handling, honest
-  error mapping, startup model warm-up, idempotent schema upgrades, about 200
+  error mapping, startup model warm-up, idempotent schema upgrades, about 230
   hermetic tests and GitHub Actions CI.

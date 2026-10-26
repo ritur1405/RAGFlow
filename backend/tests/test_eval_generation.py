@@ -14,6 +14,7 @@ import json
 from unittest.mock import MagicMock, patch
 
 import pytest
+from google.genai import errors as genai_errors
 
 from app import eval_generation as eg
 from app.eval_generation import ContextChunk
@@ -146,6 +147,13 @@ class TestFailurePolicy:
         client = _client("not json", _judge_json())
         assert _run(client).faithfulness.score == 0.9
         assert client.models.generate_content.call_count == 2
+
+    def test_api_errors_are_not_retried_again(self):
+        err = genai_errors.ServerError(503, {"error": {"code": 503, "message": "busy", "status": "UNAVAILABLE"}})
+        client = _client(err, _judge_json())
+        with pytest.raises(eg.JudgeCallError, match="busy"):
+            _run(client)
+        assert client.models.generate_content.call_count == 1
 
     def test_repeated_errors_raise_call_error(self):
         client = _client(*[RuntimeError("503")] * eg._MAX_RETRIES)
